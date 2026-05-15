@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useRef } from 'react';
 
 const PageTitleContext = createContext();
 
@@ -11,11 +11,19 @@ export const usePageTitle = () => {
 };
 
 export const PageTitleProvider = ({ children }) => {
-  const [title, setTitle] = useState(" ");
+  const [title, setTitle] = useState(' ');
   const [showSearchBar, setShowSearchBar] = useState(false);
+  const onNavigateRef = useRef(null);
+
+  const setOnNavigate = (fn) => { onNavigateRef.current = fn; };
+  const navigateToSearch = (place) => { onNavigateRef.current?.(place); };
 
   return (
-    <PageTitleContext.Provider value={{ title, setTitle, showSearchBar, setShowSearchBar }}>
+    <PageTitleContext.Provider value={{
+      title, setTitle,
+      showSearchBar, setShowSearchBar,
+      setOnNavigate, navigateToSearch,
+    }}>
       {children}
     </PageTitleContext.Provider>
   );
