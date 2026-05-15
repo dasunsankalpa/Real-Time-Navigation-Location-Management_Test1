@@ -13,15 +13,23 @@ export const usePageTitle = () => {
 export const PageTitleProvider = ({ children }) => {
   const [title, setTitle] = useState(' ');
   const [showSearchBar, setShowSearchBar] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [searchedPlace, setSearchedPlace] = useState(null);
   const onNavigateRef = useRef(null);
 
   const setOnNavigate = (fn) => { onNavigateRef.current = fn; };
-  const navigateToSearch = (place) => { onNavigateRef.current?.(place); };
+  const navigateToSearch = (place) => {
+    onNavigateRef.current?.(place);
+    setHasSearched(true);
+    setSearchedPlace(place);
+  };
 
   return (
     <PageTitleContext.Provider value={{
       title, setTitle,
       showSearchBar, setShowSearchBar,
+      hasSearched, setHasSearched,
+      searchedPlace, setSearchedPlace,
       setOnNavigate, navigateToSearch,
     }}>
       {children}

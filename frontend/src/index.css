@@ -21,3 +21,7 @@ body {
   min-height: 100vh;
   overflow-x: hidden;
 }
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}

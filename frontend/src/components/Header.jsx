@@ -15,7 +15,7 @@ export default function Header() {
     ensureMapsScript(() => {
       if (!inputRef.current || autocompleteRef.current) return;
       autocompleteRef.current = new window.google.maps.places.Autocomplete(inputRef.current, {
-        fields: ['geometry', 'formatted_address', 'name'],
+        fields: ['geometry', 'formatted_address', 'name', 'photos'],
       });
       autocompleteRef.current.addListener('place_changed', () => {
         const place = autocompleteRef.current.getPlace();
