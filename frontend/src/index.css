@@ -6,12 +6,18 @@
   box-sizing: border-box;
 }
 
-body {
+html, body {
   margin: 0;
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+body {
   font-family: 'Mulish', 'Segoe UI', sans-serif;
   background: #f7fbff;
 }
 
 #root {
   min-height: 100vh;
+  overflow-x: hidden;
 }
