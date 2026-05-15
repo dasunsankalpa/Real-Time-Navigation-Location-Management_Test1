@@ -1,189 +1,100 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { MapPin, Mic, Search, X } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { MapPin, Mic } from 'lucide-react';
 import Logo from '../assets/Logo.png';
 import { usePageTitle } from '../contexts/PageTitleContext';
 import sriflag from '../assets/sriflag.jpg';
 import { ensureMapsScript } from '../utils/helpers';
 
-const SRI_LANKA_BOUNDS = { north: 10.0, south: 5.7, east: 82.1, west: 79.4 };
-
 export default function Header() {
   const { title, showSearchBar, navigateToSearch } = usePageTitle();
-  const [query, setQuery] = useState('');
-  const [suggestions, setSuggestions] = useState([]);
-  const [activeIdx, setActiveIdx] = useState(-1);
+  const inputRef = useRef(null);
   const autocompleteRef = useRef(null);
-  const geocoderRef = useRef(null);
-  const containerRef = useRef(null);
 
   useEffect(() => {
+    if (!showSearchBar) return;
     ensureMapsScript(() => {
-      autocompleteRef.current = new window.google.maps.places.AutocompleteService();
-      geocoderRef.current = new window.google.maps.Geocoder();
+      if (!inputRef.current || autocompleteRef.current) return;
+      autocompleteRef.current = new window.google.maps.places.Autocomplete(inputRef.current, {
+        fields: ['geometry', 'formatted_address', 'name'],
+      });
+      autocompleteRef.current.addListener('place_changed', () => {
+        const place = autocompleteRef.current.getPlace();
+        if (place?.geometry) navigateToSearch(place);
+      });
     });
-  }, []);
-
-  const fetchSuggestions = useCallback((input) => {
-    if (!input.trim() || !autocompleteRef.current) { setSuggestions([]); return; }
-    autocompleteRef.current.getPlacePredictions(
-      {
-        input,
-        componentRestrictions: { country: 'lk' },
-        bounds: new window.google.maps.LatLngBounds(
-          { lat: SRI_LANKA_BOUNDS.south, lng: SRI_LANKA_BOUNDS.west },
-          { lat: SRI_LANKA_BOUNDS.north, lng: SRI_LANKA_BOUNDS.east }
-        ),
-      },
-      (predictions, status) => {
-        if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
-          setSuggestions(predictions);
-        } else {
-          setSuggestions([]);
-        }
-      }
-    );
-  }, []);
-
-  const handleChange = (e) => {
-    const val = e.target.value;
-    setQuery(val);
-    setActiveIdx(-1);
-    fetchSuggestions(val);
-  };
-
-  const selectSuggestion = useCallback((prediction) => {
-    setQuery(prediction.structured_formatting.main_text);
-    setSuggestions([]);
-    geocoderRef.current?.geocode({ placeId: prediction.place_id }, (results, status) => {
-      if (status === 'OK' && results[0]) navigateToSearch(results[0]);
-    });
-  }, [navigateToSearch]);
-
-  const handleSearch = useCallback(() => {
-    if (!query.trim() || !geocoderRef.current) return;
-    geocoderRef.current.geocode(
-      { address: query, componentRestrictions: { country: 'lk' } },
-      (results, status) => {
-        if (status === 'OK' && results[0]) {
-          setSuggestions([]);
-          navigateToSearch(results[0]);
-        } else {
-          fetchSuggestions(query);
-        }
-      }
-    );
-  }, [query, navigateToSearch, fetchSuggestions]);
-
-  const handleKeyDown = (e) => {
-    if (!suggestions.length) { if (e.key === 'Enter') handleSearch(); return; }
-    if (e.key === 'ArrowDown') { setActiveIdx(i => Math.min(i + 1, suggestions.length - 1)); e.preventDefault(); }
-    else if (e.key === 'ArrowUp') { setActiveIdx(i => Math.max(i - 1, -1)); e.preventDefault(); }
-    else if (e.key === 'Enter') { if (activeIdx >= 0) selectSuggestion(suggestions[activeIdx]); else handleSearch(); }
-    else if (e.key === 'Escape') setSuggestions([]);
-  };
-
-  useEffect(() => {
-    const handler = (e) => { if (!containerRef.current?.contains(e.target)) setSuggestions([]); };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
+    return () => { autocompleteRef.current = null; };
+  }, [showSearchBar]);
   return (
     <header className="relative z-10 bg-white/90 backdrop-blur-sm shadow-md py-1 h-28 overflow-visible" style={{ borderBottom: '1px solid #F5F7FA', transform: 'translateZ(0)', willChange: 'transform' }}>
       <div className="max-w-11xl mx-auto flex items-center justify-between h-full">
-        {/* Left: logo + text */}
+        {/* Left: logo + text close together */}
         <div className="flex items-center gap-1 h-full relative">
-          <img src={Logo} alt="Sri Lanka Tourism Logo" className="h-40 w-auto drop-shadow-md absolute -top-4 left-0" style={{ zIndex: 2, transform: 'translateZ(0)' }} />
-          <div className="flex flex-col items-center ml-24">
+          <img src={Logo} alt="Sri Lanka Tourism Logo" className="h-40 w-auto drop-shadow-md absolute -top-1 left-0" style={{ zIndex: 2, transform: 'translateZ(0)' }} />
+          <div className="flex flex-col items-center ml-24" style={{ marginTop: '20px' }}>
             <span className="font-bold leading-tight" style={{ fontSize: 17, color: '#122E63', fontFamily: "'Inter', sans-serif", fontWeight: 700, letterSpacing: '1px' }}>
-              Smart Virtual Tourist Guide
+                 Smart Virtual Tourist Guide
             </span>
-            <div style={{ background: '#fff', display: 'inline-block', padding: '0 8px', borderRadius: '6px', marginTop: 5 }}>
-              <span
-                className="font-bold leading-tight whitespace-nowrap"
-                style={{
-                  fontSize: 'clamp(2rem, 2.6rem, 3rem)',
-                  letterSpacing: '8px',
-                  fontFamily: "'Inter', sans-serif",
-                  display: 'inline-block',
-                  fontWeight: 700,
-                  backgroundImage: `url(${sriflag})`,
-                  backgroundSize: 'cover',
-                  backgroundPosition: 'center',
-                  backgroundClip: 'text',
-                  WebkitBackgroundClip: 'text',
-                  color: 'transparent',
-                  transform: 'translateZ(0)',
-                  willChange: 'transform',
-                }}
-              >
-                Sri Lanka
-              </span>
+            <div
+              style={{
+                background: '#fff',
+                display: 'inline-block',
+                padding: '0 8px',
+                borderRadius: '6px',
+                position: 'relative',
+                boxSizing: 'border-box',
+                marginTop: 0
+              }}
+            >
+           <span
+  className="font-bold leading-tight whitespace-nowrap"
+  style={{
+    fontSize: 'clamp(2rem, 2.6rem, 3rem)', // responsive with max size
+    letterSpacing: '8px',
+    fontFamily: "'Inter', sans-serif",
+    display: 'inline-block',
+    fontWeight: 700,
+    backgroundImage: `url(${sriflag})`,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center 20px',
+    backgroundClip: 'text',
+    WebkitBackgroundClip: 'text',
+    color: 'transparent',
+    transform: 'translateZ(0)',
+    willChange: 'transform',
+  }}
+>
+  Sri Lanka
+</span>
+  
             </div>
           </div>
         </div>
-
-        {/* Center title */}
+        {/* Middle: title absolutely centered in header */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: 1 }}>
           <h1 className="font-bold text-black text-3xl">{title}</h1>
         </div>
-
         {/* Right: Search Bar */}
         {showSearchBar ? (
-          <div ref={containerRef} style={{ position: 'relative', width: '800px', margin: '10px 30px' }}>
-            <div
-              className="flex items-center gap-2 px-4 py-2"
-              style={{
-                background: 'linear-gradient(135deg, #ffffff 0%, #A0DBFF 100%)',
-                borderRadius: '999px',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-              }}
-            >
-              <MapPin size={18} color="#000000" strokeWidth={2} />
-              <input
-                type="text"
-                value={query}
-                onChange={handleChange}
-                onKeyDown={handleKeyDown}
-                placeholder="Search Here"
-                style={{ padding: '9px 0', flex: 1 }}
-                className="bg-transparent outline-none text-sm text-gray-700 placeholder-gray-400 w-full"
-              />
-              {query.trim()
-                ? <X size={18} color="#000000" strokeWidth={2} style={{ cursor: 'pointer' }} onClick={() => { setQuery(''); setSuggestions([]); }} />
-                : <Mic size={18} color="#000000" strokeWidth={2} style={{ cursor: 'pointer' }} />
-              }
-            </div>
-
-            {suggestions.length > 0 && (
-              <ul style={{
-                position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
-                background: '#fff', borderRadius: '12px', boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-                zIndex: 9999, listStyle: 'none', margin: 0, padding: '4px 0',
-                maxHeight: '260px', overflowY: 'auto',
-              }}>
-                {suggestions.map((p, i) => (
-                  <li
-                    key={p.place_id}
-                    onMouseDown={() => selectSuggestion(p)}
-                    onMouseEnter={() => setActiveIdx(i)}
-                    style={{
-                      padding: '10px 16px', cursor: 'pointer', fontSize: '14px', color: '#333',
-                      background: i === activeIdx ? '#EFF6FF' : 'transparent',
-                      display: 'flex', alignItems: 'center', gap: '8px',
-                    }}
-                  >
-                    <MapPin size={14} color="#6B7280" />
-                    <span>
-                      <strong>{p.structured_formatting.main_text}</strong>
-                      {p.structured_formatting.secondary_text && (
-                        <span style={{ color: '#6B7280', marginLeft: 4 }}>{p.structured_formatting.secondary_text}</span>
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
+          <div
+            className="flex items-center gap-2 px-4 py-2"
+            style={{
+              background: 'linear-gradient(135deg, #ffffff 0%, #A0DBFF 100%)',
+              borderRadius: '999px',
+              width: '800px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+              margin: '10px 30px',
+              border: '0px solid rgb(205, 200, 200)'
+            }}
+          >
+            <MapPin size={18} color="#000000" strokeWidth={2} />
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search Here"
+              style={{ padding: '9px 270px' }}
+              className="flex-1 bg-transparent outline-none text-sm text-gray-700 placeholder-gray-400"
+            />
+            <Mic size={18} color="#000000" strokeWidth={2} style={{ cursor: 'pointer' }} />
           </div>
         ) : (
           <div style={{ width: '800px', margin: '10px 30px' }} />

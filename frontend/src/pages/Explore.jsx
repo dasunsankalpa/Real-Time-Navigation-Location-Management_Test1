@@ -1,5 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
-import firstMap from '../assets/firstMap.png';
+import { useEffect, useRef, useCallback } from 'react';
 import middle from '../assets/middle.png';
 import exploreIcon from '../assets/explore.png';
 import userIcon from '../assets/userIcon.png';
@@ -7,18 +6,17 @@ import directionIcon from '../assets/directionIcon.png';
 import { usePageTitle } from '../contexts/PageTitleContext';
 import { ensureMapsScript } from '../utils/helpers';
 
-const SRI_LANKA = { lat: 7.8731, lng: 80.7718 };
+const SIGIRIYA = { lat: 7.9570, lng: 80.7603 };
 
 const Explore = () => {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markerRef = useRef(null);
-  const [mapReady, setMapReady] = useState(false);
+
   const { setShowSearchBar, setOnNavigate } = usePageTitle();
 
   const handleNavigate = useCallback((place) => {
     if (!mapInstanceRef.current || !place.geometry?.location) return;
-    setMapReady(true);
     mapInstanceRef.current.panTo(place.geometry.location);
     mapInstanceRef.current.setZoom(13);
     if (markerRef.current) markerRef.current.setMap(null);
@@ -35,19 +33,14 @@ const Explore = () => {
 
 const initMap = () => {
   mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
-    center: SRI_LANKA,
-    zoom: 7,
-    restriction: {
-      latLngBounds: { north: 10.0, south: 5.7, east: 82.1, west: 79.4 },
-      strictBounds: true,
-    },
+    center: SIGIRIYA,
+    zoom: 13,
     mapTypeControl: false,
     streetViewControl: false,
     fullscreenControl: false,
-    zoomControl: false,
+    zoomControl: true,
     rotateControl: false,
-    gestureHandling: 'none',
-    scrollwheel: false,
+    gestureHandling: 'greedy',
     styles: [
       { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#a2daf2' }] },
       { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#d0f0c0' }] },
@@ -55,6 +48,11 @@ const initMap = () => {
       { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#9be79b' }] },
       { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#6abf69' }] },
     ],
+  });
+  markerRef.current = new window.google.maps.Marker({
+    position: SIGIRIYA,
+    map: mapInstanceRef.current,
+    title: 'Sigiriya, Sri Lanka',
   });
 };
 
@@ -79,27 +77,13 @@ const initMap = () => {
       </div>
 
       {/* Map area */}
-<div style={{ marginBottom: '80px', marginLeft: 0, marginRight: 0, marginTop: 0 }}>
+<div style={{ marginBottom: '80px', marginLeft: '60px', marginRight: '60px', marginTop: 0 }}>
         <div className="relative" style={{ width: '100%' }}>
-          {/* firstMap.png shown by default, hidden once a location is searched */}
-          <img
-            src={firstMap}
-            alt="Map"
-            style={{
-              width: '100%',
-              height: '1500px',
-              borderRadius: '15px',
-              boxShadow: '0 4px 24px rgba(0,0,0,0.15)',
-              display: mapReady ? 'none' : 'block',
-            }}
-          />
-         {/* Live Google Map, hidden until a location is searched */}
-{/* Live Google Map, hidden until a location is searched */}
-<div
-  ref={mapRef}
-  className="w-full block shadow-lg"
-  style={{ height: '620px', margin: 0, padding: 0, boxShadow: '0 4px 24px rgba(0,0,0,0.15)', overflow: 'hidden', display: mapReady ? 'block' : 'none' }}
-></div>
+          <div
+            ref={mapRef}
+            className="w-full block shadow-lg"
+            style={{ height: '620px', margin: 0, padding: 0, boxShadow: '0 4px 24px rgba(0,0,0,0.15)', overflow: 'hidden', borderRadius: '15px' }}
+          ></div>
 
 
           <img

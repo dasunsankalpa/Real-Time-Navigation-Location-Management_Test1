@@ -14,7 +14,7 @@ const Footer = () => {
     <footer
       style={{
         width: "100%",
-        height: "591.000732421875px",
+        height: "560px",
         position: "relative",
         opacity: 1,
         background: "linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%, rgba(160, 219, 255, 1) 100%)",
@@ -34,12 +34,12 @@ const Footer = () => {
         alt="Lotus"
         style={{
           position: "absolute",
-          left: "-58px",
-          width: "250.89px",
-          height: "500.98px",
+          left: "-108px",
+          width: "320.89px",
+          height: "570.98px",
           objectFit: "cover",
           opacity: 0.40,    
-          top:"80px"
+          top:"0px"
         }}
       />
       <div
@@ -271,8 +271,8 @@ const Footer = () => {
       <div
         style={{
           position: "absolute",
-          left: "26px",
-          top: "220px",
+          left: "6px",
+          top: "180px",
           width: "453px",
           display: "flex",
           flexDirection: "column",
@@ -290,7 +290,7 @@ const Footer = () => {
             objectFit: "contain",
             transform: "rotate(0deg)",
             opacity: 1,
-            marginLeft: "-50px",
+            marginLeft: "20px",
           }}
         />
         <div
@@ -317,7 +317,7 @@ const Footer = () => {
             lineHeight: "121%",
             letterSpacing: "0%",
             color: "#122E63",
-            marginLeft: "-10px",
+            marginLeft: "60px",
             marginTop: "50px",
           }}
         >
@@ -332,6 +332,7 @@ const Footer = () => {
                           letterSpacing: '10px',
                           fontFamily: "'Inter', sans-serif",
                           display: 'inline-block',
+                          marginLeft: '70px',
                           fontWeight: 700,
                           backgroundImage: `url(${sriflag})`,
                           backgroundSize: 'cover',
@@ -353,7 +354,7 @@ const Footer = () => {
               gap: '10px',
               marginTop: '10px',
               opacity: 1,
-              marginLeft: '90px',
+              marginLeft: '130px',
               marginRight: 'auto',
             }}
           >
