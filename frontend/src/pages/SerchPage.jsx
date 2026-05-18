@@ -11,7 +11,7 @@ const Explore = () => {
         <img 
           src={middle} 
           alt="Ocean background" 
-          className="w-full h-full object-cover scale-x-[1.7]" 
+          className="w-full h-full object-cover" 
         />
       </div>
 

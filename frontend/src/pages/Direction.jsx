@@ -426,6 +426,15 @@ const Direction = () => {
     setDestPlace(place);
     if (userLocationRef.current) {
       const loc = place.geometry.location;
+      if (destMarkerRef.current) {
+        destMarkerRef.current.setPosition({ lat: loc.lat(), lng: loc.lng() });
+      } else if (mapInstanceRef.current) {
+        destMarkerRef.current = new window.google.maps.Marker({
+          position: { lat: loc.lat(), lng: loc.lng() },
+          map: mapInstanceRef.current,
+          icon: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png',
+        });
+      }
       requestDirections(userLocationRef.current, loc, selectedMode);
     }
   }, [selectedMode]);
@@ -465,12 +474,12 @@ const Direction = () => {
 
       // Silently detect user location — place marker only, no route
       if (userLocation) {
-        applyOrigin(userLocation, 'Your location', false);
+        applyOrigin(userLocation, 'Your location', Boolean(destLoc));
       } else if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (pos) => {
             const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-            applyOrigin(loc, 'Your location', false);
+            applyOrigin(loc, 'Your location', Boolean(destLoc));
           },
           () => {}
         );
@@ -489,6 +498,22 @@ const Direction = () => {
 
     requestDirections(origin, currentDestination, selectedMode);
   }, [selectedMode]);
+
+  useEffect(() => {
+    if (searchedPlace) {
+      setDestPlace(searchedPlace);
+    }
+  }, [searchedPlace]);
+
+  useEffect(() => {
+    if (!mapInstanceRef.current || originChosenRef.current) return;
+    const dest = destPlace || searchedPlace;
+    const destLoc = dest?.geometry?.location;
+    if (userLocationRef.current && destLoc) {
+      originChosenRef.current = true;
+      requestDirections(userLocationRef.current, destLoc, selectedMode);
+    }
+  }, [destPlace, searchedPlace, selectedMode]);
 
   const handleSwap = () => {
     const { origin, destination: currentDestination } = activeRoutePairRef.current;
