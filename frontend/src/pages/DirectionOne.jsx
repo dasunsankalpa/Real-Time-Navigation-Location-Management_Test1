@@ -20,6 +20,7 @@ const recentPlaces = [
 
 const DirectionOne = () => {
   const [selectedVehicle, setSelectedVehicle] = useState(null);
+  const [swapped, setSwapped] = useState(false);
 
   const vehicles = [
     { key: 'bus',  src: busIcon,  alt: 'Bus',  className: 'w-12 h-12' },
@@ -48,31 +49,32 @@ const DirectionOne = () => {
         <div className="flex flex-col" style={{ gap: '20px' }}>
           {/* directionCircle row */}
           <div className="flex items-center">
-            <img src={directionCircle} alt="Your location" style={{ width: '48px', height: '48px', marginRight: '10px' }} />
+            <img src={swapped ? locationRed : directionCircle} alt="Origin" style={{ width: '48px', height: '48px', marginRight: '10px' }} />
             <div
               className="bg-gradient-to-r from-[#FFFFFF] to-[#A0DBFF] shadow text-full text-center font-bold"
               style={{ borderRadius: '8px', padding: '16px 24px', width: '700px' }}
             >
-              Your location
+              {swapped ? 'Choose Destination' : 'Your location'}
             </div>
           </div>
           {/* locationRed row */}
           <div className="flex items-center">
-            <img src={locationRed} alt="Destination" style={{ width: '48px', height: '48px', marginRight: '10px' }} />
+            <img src={swapped ? directionCircle : locationRed} alt="Destination" style={{ width: '48px', height: '48px', marginRight: '10px' }} />
             <div
               className="bg-gradient-to-r from-[#FFFFFF] to-[#A0DBFF] shadow text-full text-center font-bold"
               style={{ borderRadius: '8px', padding: '16px 24px', width: '700px' }}
             >
-              Choose Destination
+              {swapped ? 'Your location' : 'Choose Destination'}
             </div>
           </div>
         </div>
 
-        {/* Single upDown icon beside both boxes - adjust marginLeft/width */}
+        {/* Single upDown icon beside both boxes */}
         <img
           src={upDown}
           alt="Swap"
-          style={{ width: '40px', marginLeft: '20px', cursor: 'pointer',marginRight: '720px' }}
+          onClick={() => setSwapped(prev => !prev)}
+          style={{ width: '40px', marginLeft: '20px', cursor: 'pointer', marginRight: '720px' }}
         />
       </div>
 

@@ -15,6 +15,8 @@ export const PageTitleProvider = ({ children }) => {
   const [showSearchBar, setShowSearchBar] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [searchedPlace, setSearchedPlace] = useState(null);
+  const [activePage, setActivePage] = useState('explore');
+  const [userLocation, setUserLocation] = useState(null);
   const onNavigateRef = useRef(null);
 
   const setOnNavigate = (fn) => { onNavigateRef.current = fn; };
@@ -30,6 +32,8 @@ export const PageTitleProvider = ({ children }) => {
       showSearchBar, setShowSearchBar,
       hasSearched, setHasSearched,
       searchedPlace, setSearchedPlace,
+      activePage, setActivePage,
+      userLocation, setUserLocation,
       setOnNavigate, navigateToSearch,
     }}>
       {children}

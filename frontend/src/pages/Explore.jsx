@@ -8,14 +8,15 @@ import directionImg from '../assets/direction.png';
 import { usePageTitle } from '../contexts/PageTitleContext';
 import { ensureMapsScript } from '../utils/helpers';
 
-const SIGIRIYA = { lat: 7.9570, lng: 80.7603 };
+const USER_LOCATION = { lat: 7.8731, lng: 80.7718 }; // Sri Lanka center
 
 const Explore = () => {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markerRef = useRef(null);
+  const userMarkerRef = useRef(null);
 
-  const { setShowSearchBar, setOnNavigate, hasSearched, setHasSearched, searchedPlace } = usePageTitle();
+  const { setShowSearchBar, setOnNavigate, hasSearched, setHasSearched, searchedPlace, setActivePage, setUserLocation } = usePageTitle();
   const [localSearched, setLocalSearched] = useState(false);
   const searched = hasSearched || localSearched;
   const [placePhotos, setPlacePhotos] = useState([]);
@@ -29,7 +30,7 @@ const Explore = () => {
     markerRef.current = new window.google.maps.Marker({
       position: place.geometry.location,
       map: mapInstanceRef.current,
-      title: place.formatted_address,
+      title: /^[23456789CFGHJMPQRVWX]{4}\+/.test(place.formatted_address || '') ? place.name : (place.formatted_address || place.name),
     });
     setLocalSearched(true);
     setHasSearched(true);
@@ -121,10 +122,10 @@ const Explore = () => {
     setShowSearchBar(true);
     setOnNavigate(handleNavigate);
 
-const initMap = () => {
+const initMap = (center, zoom) => {
   mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
-    center: SIGIRIYA,
-    zoom: 13,
+    center,
+    zoom,
     mapTypeControl: false,
     streetViewControl: false,
     fullscreenControl: false,
@@ -139,15 +140,45 @@ const initMap = () => {
       { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#6abf69' }] },
     ],
   });
-  markerRef.current = new window.google.maps.Marker({
-    position: SIGIRIYA,
+};
+
+const placeUserMarker = (coords) => {
+  if (userMarkerRef.current) userMarkerRef.current.setMap(null);
+  userMarkerRef.current = new window.google.maps.Marker({
+    position: coords,
     map: mapInstanceRef.current,
-    title: 'Sigiriya, Sri Lanka',
+    title: 'Your Location',
+    icon: {
+      path: window.google.maps.SymbolPath.CIRCLE,
+      scale: 10,
+      fillColor: '#4285F4',
+      fillOpacity: 1,
+      strokeColor: '#fff',
+      strokeWeight: 2,
+    },
   });
 };
 
+ensureMapsScript(() => {
+  initMap(USER_LOCATION, 8);
 
-    ensureMapsScript(initMap);
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const pos = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        };
+        setUserLocation(pos);
+        mapInstanceRef.current.setCenter(pos);
+        mapInstanceRef.current.setZoom(14);
+        placeUserMarker(pos);
+      },
+      () => {}
+    );
+  }
+});
+
 
     return () => {
       setShowSearchBar(false);
@@ -195,18 +226,6 @@ const initMap = () => {
           minHeight: '700px',
           background: '#D7EEFD',
         }}>
-          {/* Rectangle background layer */}
-          <div style={{
-            position: 'absolute',
-            width: '1443.93px',
-            height: '844.18px',
-            top: '0px',
-            left: '0px',
-            transform: 'rotate(0.09deg)',
-            background: '#D7EEFD',
-            opacity: 1,
-            zIndex: 0,
-          }} />
           <img
             src={explore2}
             alt="Explore"
@@ -247,12 +266,13 @@ const initMap = () => {
                   display: 'block',
                   marginBottom: '100px',
                 }}>
-                  {searchedPlace.formatted_address || searchedPlace.name}
+                  {searchedPlace.displayName || searchedPlace.formatted_address?.split(',')[0]}
                 </span>
-                <div style={{ display: 'flex', gap: '250px' }}>
+                <div style={{ display: 'flex', gap: '250px',marginTop: '60px' }}>
                   {[{ label: 'Direction', icon: directionImg }, { label: 'Start', icon: null }, { label: 'Save', icon: null }, { label: 'Share', icon: null }].map(({ label, icon }) => (
                     <button
                       key={label}
+                      onClick={() => label === 'Direction' && setActivePage('direction')}
                       style={{
                         padding: '10px 24px',
                         borderRadius: '6px',
@@ -276,7 +296,7 @@ const initMap = () => {
                 </div>
                 {/* 3 photos layout */}
                 {placePhotos.length > 0 && (
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '150px', height: '620px', width: '100%' }}>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '130px', height: '620px', width: '100%' }}>
                     {/* Large photo on the left */}
                     <img
                       src={placePhotos[0]}
