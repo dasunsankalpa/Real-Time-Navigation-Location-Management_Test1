@@ -1,23 +1,16 @@
-import firstMap from '../assets/firstMap.png';
-import middle from '../assets/middle.png';
+import { useEffect } from 'react';
+import Direction from './Direction';
+import { usePageTitle } from '../contexts/PageTitleContext';
 
-// If you meant a different image, change 'Logo' to the correct import (e.g., import startMap from '../assets/startMap.png')
+const StartPage = () => {
+  const { setShowSearchBar } = usePageTitle();
 
-const Explore = () => {
-  return (
-    <div className="relative w-full h-full py-12" style={{ minHeight: '700px' }}>
-      {/* Background image */}
-      <div className="absolute inset-0 z-0 opacity-40">
-        <img 
-          src={middle} 
-          alt="Ocean background" 
-          className="w-full h-full object-cover scale-x-[1.7]" 
-        />
-      </div>
+  useEffect(() => {
+    setShowSearchBar(true);
+  }, [setShowSearchBar]);
 
-    </div>
-  );
+  return <Direction showDetailsPanel={false} />;
 };
 
-export default Explore;
+export default StartPage;
 

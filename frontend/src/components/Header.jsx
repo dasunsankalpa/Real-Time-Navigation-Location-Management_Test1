@@ -8,7 +8,7 @@ import { ensureMapsScript } from '../utils/helpers';
 const SRI_LANKA_BOUNDS = { north: 10.0, south: 5.7, east: 82.1, west: 79.4 };
 
 export default function Header() {
-  const { title, showSearchBar, navigateToSearch } = usePageTitle();
+  const { title, showSearchBar, navigateToSearch, activePage, searchedPlace } = usePageTitle();
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [activeIdx, setActiveIdx] = useState(-1);
@@ -90,6 +90,9 @@ export default function Header() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  const startPageDestination = searchedPlace?.displayName || searchedPlace?.formatted_address?.split(',')[0] || '';
+  const isStartPage = activePage === 'start';
+
   return (
     <header className="relative z-10 bg-white/90 backdrop-blur-sm shadow-md py-1 h-28 overflow-visible" style={{ borderBottom: '1px solid #F5F7FA', transform: 'translateZ(0)', willChange: 'transform' }}>
       <div className="max-w-11xl mx-auto flex items-center justify-between h-full">
@@ -131,7 +134,7 @@ export default function Header() {
         </div>
 
         {/* Right: Search Bar */}
-        {showSearchBar ? (
+        {showSearchBar && activePage !== 'safety' ? (
           <div ref={containerRef} style={{ position: 'relative', width: '800px', margin: '10px 30px' }}>
             <div
               className="flex items-center gap-2 px-4 py-2"
@@ -144,20 +147,21 @@ export default function Header() {
               <MapPin size={18} color="#000000" strokeWidth={2} />
               <input
                 type="text"
-                value={query}
-                onChange={handleChange}
-                onKeyDown={handleKeyDown}
+                value={isStartPage ? startPageDestination : query}
+                onChange={isStartPage ? undefined : handleChange}
+                onKeyDown={isStartPage ? undefined : handleKeyDown}
                 placeholder="Search Here"
+                readOnly={isStartPage}
                 style={{ padding: '9px 0', flex: 1 }}
                 className="bg-transparent outline-none text-sm text-gray-700 placeholder-gray-400 w-full"
               />
-              {query.trim()
+              {!isStartPage && query.trim()
                 ? <X size={18} color="#000000" strokeWidth={2} style={{ cursor: 'pointer' }} onClick={() => { setQuery(''); setSuggestions([]); }} />
                 : <Mic size={18} color="#000000" strokeWidth={2} style={{ cursor: 'pointer' }} />
               }
             </div>
 
-            {suggestions.length > 0 && (
+            {!isStartPage && suggestions.length > 0 && (
               <ul style={{
                 position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
                 background: '#fff', borderRadius: '12px', boxShadow: '0 4px 16px rgba(0,0,0,0.12)',

@@ -16,7 +16,18 @@ const saveToHistory = (name) => {
   localStorage.setItem(HISTORY_KEY, JSON.stringify([name, ...prev].slice(0, 5)));
 };
 
-export default function LocationInput({ icon, placeholder, initialValue = '', onSelect, showGps = false, onGpsSelect, gpsDisplayValue = '[Your Location]' }) {
+export default function LocationInput({
+  icon,
+  placeholder,
+  initialValue = '',
+  onSelect,
+  showGps = false,
+  onGpsSelect,
+  gpsDisplayValue = '[Your Location]',
+  readOnly = false,
+  staticValue,
+  showDropdown = true,
+}) {
   const {
     query, setQuery, suggestions, activeIdx, setActiveIdx,
     containerRef, handleChange, handleSearch, handleKeyDown, confirmPlace,
@@ -28,10 +39,13 @@ export default function LocationInput({ icon, placeholder, initialValue = '', on
   const [focused, setFocused] = useState(false);
   const history = getHistory();
 
+  const inputValue = staticValue != null ? staticValue : query;
+  const allowDropdown = showDropdown && !readOnly && staticValue == null;
+
   // Show pre-focus dropdown: GPS + history (only when query is empty and focused)
-  const showPrefocus = focused && !query.trim() && (showGps || history.length > 0);
+  const showPrefocus = allowDropdown && focused && !query.trim() && (showGps || history.length > 0);
   // Show API suggestions while typing
-  const showSuggestions = suggestions.length > 0;
+  const showSuggestions = allowDropdown && suggestions.length > 0;
 
   return (
     <div ref={containerRef} style={{ position: 'relative', flex: 1 }}>
@@ -40,16 +54,17 @@ export default function LocationInput({ icon, placeholder, initialValue = '', on
         <div className="flex items-center min-w-0" style={{ flex: 1 }}>
           <input
             type="text"
-            value={query}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
+            value={inputValue}
+            readOnly={readOnly || staticValue != null}
+            onChange={readOnly || staticValue != null ? undefined : handleChange}
+            onKeyDown={readOnly || staticValue != null ? undefined : handleKeyDown}
             onFocus={() => setFocused(true)}
             onBlur={() => setTimeout(() => setFocused(false), 150)}
             placeholder={placeholder}
             className="bg-transparent outline-none text-sm text-gray-700 placeholder-gray-400"
             style={{ flex: 1, minWidth: 0 }}
           />
-          {query.trim() && (
+          {!readOnly && staticValue == null && query.trim() && (
             <Search
               size={14}
               color="#6B7280"
