@@ -9,6 +9,7 @@ import carIcon from '../assets/carIcon.png';
 import clockIcon from '../assets/clockIcon.png';
 import blueLocationIcon from '../assets/directionCircle.png';
 import redPinIcon from '../assets/locationRed.png';
+import gpsIcon from '../assets/gpsSearch.png';
 import threeDots from '../assets/3dots.png';
 import upDown from '../assets/upDown.png';
 import closeIcon from '../assets/closeIcon.png';
@@ -139,7 +140,7 @@ const describeRoute = (route, idx, allRoutes) => {
 };
 
 const Direction = ({ showDetailsPanel = true }) => {
-  const { searchedPlace, userLocation, setActivePage } = usePageTitle();
+  const { searchedPlace, userLocation, setActivePage, pendingOriginLabel, pendingVehicle, setPendingOriginLabel, setPendingVehicle } = usePageTitle();
   const destination = searchedPlace?.displayName || searchedPlace?.formatted_address?.split(',')[0] || 'destination';
 
   const mapRef = useRef(null);
@@ -153,7 +154,10 @@ const Direction = ({ showDetailsPanel = true }) => {
 
   const [routes, setRoutes] = useState([]);
   const [selectedIdx, setSelectedIdx] = useState(0);
-  const [selectedMode, setSelectedMode] = useState('drive');
+  const [selectedMode, setSelectedMode] = useState(() => {
+    const map = { bus: 'transit', bike: 'bike', car: 'drive', man: 'walk' };
+    return (pendingVehicle && map[pendingVehicle]) || 'drive';
+  });
   const [error, setError] = useState(null);
   const [swapped, setSwapped] = useState(false);
   const [loadingRoutes, setLoadingRoutes] = useState(false);
@@ -207,7 +211,7 @@ const Direction = ({ showDetailsPanel = true }) => {
     const config = CATEGORY_TYPES[category];
     if (!config) return;
 
-    const searchRadius = config.type === 'gas_station' ? 800 : 500;
+    const searchRadius = config.type === 'gas_station' ? 1500 : 800;
 
     setPoiLoading(true);
     setPoiResults([]);
@@ -754,10 +758,34 @@ const Direction = ({ showDetailsPanel = true }) => {
     }
   }, [selectedMode]);
 
+  const handleGpsSearch = useCallback(() => {
+    if (!navigator.geolocation) return;
+
+    if (navWatchIdRef.current != null) {
+      navigator.geolocation.clearWatch(navWatchIdRef.current);
+      navWatchIdRef.current = null;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        userLocationRef.current = loc;
+        applyOrigin(loc, 'Your location', true);
+        mapInstanceRef.current?.panTo(loc);
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
+  }, [applyOrigin]);
+
   useEffect(() => {
     ensureMapsScript(() => {
       const destLoc = (destPlace || searchedPlace)?.geometry?.location;
       const initialCenter = destLoc ? { lat: destLoc.lat(), lng: destLoc.lng() } : { lat: 7.8731, lng: 80.7718 };
+
+      // Clear pending values now that we've consumed them
+      if (pendingOriginLabel) setPendingOriginLabel('');
+      if (pendingVehicle) setPendingVehicle(null);
 
       mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
         center: initialCenter,
@@ -995,7 +1023,6 @@ const Direction = ({ showDetailsPanel = true }) => {
       }
     );
   }, [selectedIdx]);
-
   useEffect(() => {
     if (addStopOpen && activeCategory) searchPlacesAlongRoute(activeCategory);
   }, [selectedIdx]);
@@ -1027,6 +1054,35 @@ const Direction = ({ showDetailsPanel = true }) => {
       <div className="relative z-10 w-full">
         <div className="relative w-full" style={{ height: mapHeight, transition: 'height 0.35s ease' }}>
           <div ref={mapRef} className="h-full w-full shadow-[0_18px_50px_rgba(18,46,99,0.12)]" />
+          <div
+            className="absolute right-4 z-30"
+            style={{ bottom: '200px', pointerEvents: 'none' }}
+          >
+            <button
+              type="button"
+              onClick={handleGpsSearch}
+              aria-label="Use current location"
+              style={{
+                  pointerEvents: 'auto',
+                  width: '45px',
+                  height: '45px',
+                  borderRadius: '16px',
+                  border: 'none',
+                  background: '#1A73E8',
+                  boxShadow: '0 10px 24px rgba(26,115,232,0.28)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  position: 'absolute',        // anchor positioning
+                  right: '0px',                // stick to right corner
+                  bottom: 'var(--gps-margin, 8px)' // adjustable bottom margin
+      
+              }}
+            >
+              <img src={gpsIcon} alt="GPS search" style={{ width: '25px', height: '25px' }} />
+            </button>
+          </div>
           {!showDetailsPanel && (
             <div className="absolute left-1/2 top-6 z-20 w-[90%] max-w-[720px] -translate-x-1/2">
               <div className="flex items-center gap-4 rounded-2xl bg-white/95 px-5 py-4 shadow-lg backdrop-blur">
@@ -1419,7 +1475,7 @@ const Direction = ({ showDetailsPanel = true }) => {
             <img src={swapped ? redPinIcon : blueLocationIcon} alt="Origin" className="w-5 h-5 shrink-0" />
             <LocationInput
               placeholder="Your location"
-              initialValue=''
+              initialValue={pendingOriginLabel || ''}
               onSelect={onOriginSelect}
               showGps
               gpsDisplayValue="Your Location"

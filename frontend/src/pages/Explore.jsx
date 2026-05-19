@@ -208,6 +208,7 @@ ensureMapsScript(() => {
           <img
             src={directionIcon}
             alt="Direction"
+            onClick={() => setActivePage('directionOne')}
             style={{ position: 'absolute', bottom: '20px', right: '50px', width: '70px', cursor: 'pointer', zIndex: 10 }}
           />
         </div>
