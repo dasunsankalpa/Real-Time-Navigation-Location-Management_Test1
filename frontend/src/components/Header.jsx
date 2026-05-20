@@ -92,6 +92,8 @@ export default function Header() {
 
   const startPageDestination = searchedPlace?.displayName || searchedPlace?.formatted_address?.split(',')[0] || '';
   const isStartPage = activePage === 'start';
+  const isEtaPage = activePage === 'eta';
+  const readOnlySearch = isStartPage || isEtaPage;
 
   return (
     <header className="relative z-10 bg-white/90 backdrop-blur-sm shadow-md py-1 h-28 overflow-visible" style={{ borderBottom: '1px solid #F5F7FA', transform: 'translateZ(0)', willChange: 'transform' }}>
@@ -130,7 +132,7 @@ export default function Header() {
 
         {/* Center title */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: 1 }}>
-          <h1 className="font-bold text-black text-3xl">{title}</h1>
+          <h1 className="font-bold text-black text-3xl">{activePage === 'eta' ? '' : title}</h1>
         </div>
 
         {/* Right: Search Bar */}
@@ -144,24 +146,27 @@ export default function Header() {
                 boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
               }}
             >
-              <MapPin size={18} color="#000000" strokeWidth={2} />
+              <Search size={18} color="#000000" strokeWidth={2} />
               <input
                 type="text"
-                value={isStartPage ? startPageDestination : query}
-                onChange={isStartPage ? undefined : handleChange}
-                onKeyDown={isStartPage ? undefined : handleKeyDown}
+                value={readOnlySearch ? startPageDestination : query}
+                onChange={readOnlySearch ? undefined : handleChange}
+                onKeyDown={readOnlySearch ? undefined : handleKeyDown}
                 placeholder="Search Here"
-                readOnly={isStartPage}
+                readOnly={readOnlySearch}
                 style={{ padding: '9px 0', flex: 1 }}
                 className="bg-transparent outline-none text-sm text-gray-700 placeholder-gray-400 w-full"
               />
-              {!isStartPage && query.trim()
+              {isEtaPage && (
+                <span style={{ fontSize: '13px', fontWeight: 700, color: '#111827', marginRight: '24px' }}>ETA Details</span>
+              )}
+              {!readOnlySearch && query.trim()
                 ? <X size={18} color="#000000" strokeWidth={2} style={{ cursor: 'pointer' }} onClick={() => { setQuery(''); setSuggestions([]); }} />
                 : <Mic size={18} color="#000000" strokeWidth={2} style={{ cursor: 'pointer' }} />
               }
             </div>
 
-            {!isStartPage && suggestions.length > 0 && (
+            {!readOnlySearch && suggestions.length > 0 && (
               <ul style={{
                 position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
                 background: '#fff', borderRadius: '12px', boxShadow: '0 4px 16px rgba(0,0,0,0.12)',

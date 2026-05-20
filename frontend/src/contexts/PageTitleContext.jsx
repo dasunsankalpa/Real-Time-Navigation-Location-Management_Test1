@@ -17,6 +17,9 @@ export const PageTitleProvider = ({ children }) => {
   const [searchedPlace, setSearchedPlace] = useState(null);
   const [activePage, setActivePage] = useState('explore');
   const [userLocation, setUserLocation] = useState(null);
+  const [pendingOriginLabel, setPendingOriginLabel] = useState('');
+  const [pendingVehicle, setPendingVehicle] = useState(null);
+  const [etaData, setEtaData] = useState(null);
   const onNavigateRef = useRef(null);
 
   const setOnNavigate = (fn) => { onNavigateRef.current = fn; };
@@ -34,6 +37,9 @@ export const PageTitleProvider = ({ children }) => {
       searchedPlace, setSearchedPlace,
       activePage, setActivePage,
       userLocation, setUserLocation,
+      pendingOriginLabel, setPendingOriginLabel,
+      pendingVehicle, setPendingVehicle,
+      etaData, setEtaData,
       setOnNavigate, navigateToSearch,
     }}>
       {children}

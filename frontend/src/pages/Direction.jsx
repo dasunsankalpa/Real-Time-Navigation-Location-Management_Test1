@@ -9,6 +9,7 @@ import carIcon from '../assets/carIcon.png';
 import clockIcon from '../assets/clockIcon.png';
 import blueLocationIcon from '../assets/directionCircle.png';
 import redPinIcon from '../assets/locationRed.png';
+import gpsIcon from '../assets/gpsSearch.png';
 import threeDots from '../assets/3dots.png';
 import upDown from '../assets/upDown.png';
 import closeIcon from '../assets/closeIcon.png';
@@ -139,7 +140,12 @@ const describeRoute = (route, idx, allRoutes) => {
 };
 
 const Direction = ({ showDetailsPanel = true }) => {
-  const { searchedPlace, userLocation, setActivePage } = usePageTitle();
+  const { searchedPlace, userLocation, setActivePage, pendingOriginLabel, pendingVehicle, setPendingOriginLabel, setPendingVehicle, setTitle, setEtaData } = usePageTitle();
+
+  // Expose navigation and ETA setter globally for overlay click handler
+  window.setActivePageGlobal = setActivePage;
+  window.setEtaTitleGlobal = setTitle;
+  window.setEtaDataGlobal = setEtaData;
   const destination = searchedPlace?.displayName || searchedPlace?.formatted_address?.split(',')[0] || 'destination';
 
   const mapRef = useRef(null);
@@ -153,7 +159,10 @@ const Direction = ({ showDetailsPanel = true }) => {
 
   const [routes, setRoutes] = useState([]);
   const [selectedIdx, setSelectedIdx] = useState(0);
-  const [selectedMode, setSelectedMode] = useState('drive');
+  const [selectedMode, setSelectedMode] = useState(() => {
+    const map = { bus: 'transit', bike: 'bike', car: 'drive', man: 'walk' };
+    return (pendingVehicle && map[pendingVehicle]) || 'drive';
+  });
   const [error, setError] = useState(null);
   const [swapped, setSwapped] = useState(false);
   const [loadingRoutes, setLoadingRoutes] = useState(false);
@@ -162,6 +171,120 @@ const Direction = ({ showDetailsPanel = true }) => {
   const [destPlace, setDestPlace] = useState(searchedPlace);
   const [fallbackMode, setFallbackMode] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
+  const [addStopOpen, setAddStopOpen] = useState(false);
+  const [stopQuery, setStopQuery] = useState('');
+  const [stopSuggestions, setStopSuggestions] = useState([]);
+  const [stopActiveIdx, setStopActiveIdx] = useState(-1);
+  const [activeCategory, setActiveCategory] = useState(null);
+  const [poiResults, setPoiResults] = useState([]);
+  const [poiLoading, setPoiLoading] = useState(false);
+  const [stopPanelCollapsed, setStopPanelCollapsed] = useState(false);
+
+  const CATEGORY_TYPES = {
+    'Restaurant':      { type: 'restaurant',    keyword: 'restaurant' },
+    'Petrol Station':  { type: 'gas_station',   keyword: 'petrol station' },
+    'Coffee Shop':     { type: 'cafe',          keyword: 'coffee shop' },
+    'Supermarket':     { type: 'supermarket',   keyword: 'supermarket' },
+  };
+
+  const getDistanceToPath = (point, path) => {
+    const R = 6371000;
+    const toRad2 = (v) => (v * Math.PI) / 180;
+    let minDist = Infinity;
+    const pLat = typeof point.lat === 'function' ? point.lat() : point.lat;
+    const pLng = typeof point.lng === 'function' ? point.lng() : point.lng;
+    for (const seg of path) {
+      const sLat = typeof seg.lat === 'function' ? seg.lat() : seg.lat;
+      const sLng = typeof seg.lng === 'function' ? seg.lng() : seg.lng;
+      const dLat = toRad2(pLat - sLat);
+      const dLng = toRad2(pLng - sLng);
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad2(sLat)) * Math.cos(toRad2(pLat)) * Math.sin(dLng / 2) ** 2;
+      const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      if (d < minDist) minDist = d;
+    }
+    return minDist;
+  };
+
+  const searchPlacesAlongRoute = useCallback((category) => {
+    const result = directionsResultRef.current;
+    if (!result || !mapInstanceRef.current) return;
+
+    const routeIndex = selectedIdx;
+    const path = result.routes[routeIndex]?.overview_path || [];
+    if (!path.length) return;
+
+    const config = CATEGORY_TYPES[category];
+    if (!config) return;
+
+    const searchRadius = config.type === 'gas_station' ? 1500 : 800;
+
+    setPoiLoading(true);
+    setPoiResults([]);
+    clearPoiMarkers();
+
+    // Scale sample count and radius based on route length
+    const totalPoints = path.length;
+    const sampleCount = Math.min(20, Math.max(8, Math.floor(totalPoints / 10)));
+    const step = Math.max(1, Math.floor(totalPoints / sampleCount));
+    const samplePoints = [];
+    for (let i = 0; i < totalPoints; i += step) samplePoints.push(path[i]);
+    // Always include last point
+    if (samplePoints[samplePoints.length - 1] !== path[totalPoints - 1]) {
+      samplePoints.push(path[totalPoints - 1]);
+    }
+
+    const service = new window.google.maps.places.PlacesService(mapInstanceRef.current);
+    const seen = new Set();
+    const collected = [];
+    let pending = samplePoints.length;
+
+    samplePoints.forEach((point) => {
+      service.nearbySearch(
+        { location: point, radius: searchRadius, type: config.type, keyword: config.keyword },
+        (results, status) => {
+          if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
+            results.forEach((place) => {
+              if (seen.has(place.place_id)) return;
+              const dist = getDistanceToPath(place.geometry.location, path);
+              if (dist <= searchRadius) {
+                seen.add(place.place_id);
+                collected.push({
+                  name: place.name,
+                  rating: place.rating || null,
+                  vicinity: place.vicinity || '',
+                  photo: place.photos?.[0]?.getUrl({ maxWidth: 300 }) || null,
+                  placeId: place.place_id,
+                  location: place.geometry.location,
+                });
+              }
+            });
+          }
+          pending -= 1;
+          if (pending === 0) {
+            const sorted = collected.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+            setPoiResults(sorted);
+            setPoiLoading(false);
+            sorted.forEach((place) => {
+              const marker = new window.google.maps.Marker({
+                position: place.location,
+                map: mapInstanceRef.current,
+                title: place.name,
+                icon: { url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png' },
+              });
+              const infoWindow = new window.google.maps.InfoWindow({
+                content: `<div style="font-family:Inter,sans-serif;font-size:13px;max-width:160px"><strong>${place.name}</strong>${place.rating ? `<br/>⭐ ${place.rating.toFixed(1)}` : ''}<br/><span style="color:#6B7280;font-size:11px">${place.vicinity}</span></div>`,
+              });
+              marker.addListener('click', () => infoWindow.open(mapInstanceRef.current, marker));
+              poiMarkersRef.current.push(marker);
+            });
+          }
+        }
+      );
+    });
+  }, [selectedIdx]);
+  const stopAutocompleteRef = useRef(null);
+  const stopGeocoderRef = useRef(null);
+  const stopContainerRef = useRef(null);
   const [mapReady, setMapReady] = useState(false);
   const [navStepIndex, setNavStepIndex] = useState(0);
   const [navInstruction, setNavInstruction] = useState('');
@@ -187,22 +310,29 @@ const Direction = ({ showDetailsPanel = true }) => {
   const floodLabelsRef = useRef([]);
   const floodPollRef = useRef(null);
   const RouteLabelClassRef = useRef(null);
+  const poiMarkersRef = useRef([]);
+  const pathClickLabelRef = useRef(null);
 
   const [floodDetected, setFloodDetected] = useState(false);
 
   const getRouteLabelClass = () => {
     if (RouteLabelClassRef.current) return RouteLabelClassRef.current;
     RouteLabelClassRef.current = class RouteLabel extends window.google.maps.OverlayView {
-      constructor(pos, html) {
+      constructor(pos, html, onClick) {
         super();
         this.pos = pos;
         this.html = html;
         this.div = null;
+        this._onClick = onClick || null;
       }
       onAdd() {
         this.div = document.createElement('div');
-        this.div.style.cssText = 'position:absolute;pointer-events:none;transform:translate(-50%,-50%);z-index:1000;';
+        const clickable = !!this._onClick;
+        this.div.style.cssText = `position:absolute;pointer-events:${clickable ? 'auto' : 'none'};transform:translate(-50%,-50%);z-index:1000;${clickable ? 'cursor:pointer;' : ''}`;
         this.div.innerHTML = this.html;
+        if (this._onClick) {
+          this.div.addEventListener('click', this._onClick);
+        }
         this.getPanes().floatPane.appendChild(this.div);
       }
       draw() {
@@ -216,9 +346,9 @@ const Direction = ({ showDetailsPanel = true }) => {
     return RouteLabelClassRef.current;
   };
 
-  const createRouteLabel = (map, position, content) => {
+  const createRouteLabel = (map, position, content, onClick) => {
     const LabelClass = getRouteLabelClass();
-    const label = new LabelClass(position, content);
+    const label = new LabelClass(position, content, onClick);
     label.setMap(map);
     return label;
   };
@@ -280,6 +410,18 @@ const Direction = ({ showDetailsPanel = true }) => {
     }
   }, [navStepIndex, selectedIdx]);
 
+  const clearPoiMarkers = () => {
+    poiMarkersRef.current.forEach((m) => m.setMap(null));
+    poiMarkersRef.current = [];
+  };
+
+  const clearPathClickLabel = () => {
+    if (pathClickLabelRef.current) {
+      pathClickLabelRef.current.setMap(null);
+      pathClickLabelRef.current = null;
+    }
+  };
+
   const clearFloodOverlays = () => {
     floodLabelsRef.current.forEach((label) => label.setMap(null));
     floodLabelsRef.current = [];
@@ -290,6 +432,7 @@ const Direction = ({ showDetailsPanel = true }) => {
     clickPathsRef.current.forEach((path) => path.setMap(null));
     routeLabelsRef.current.forEach((label) => label.setMap(null));
     clearFloodOverlays();
+    clearPathClickLabel();
     renderersRef.current = [];
     clickPathsRef.current = [];
     routeLabelsRef.current = [];
@@ -348,11 +491,34 @@ const Direction = ({ showDetailsPanel = true }) => {
         path: route.overview_path,
         map: mapInstanceRef.current,
         strokeOpacity: 0,
-        strokeWeight: 20,
+        strokeWeight: 40,
         zIndex: 20,
         clickable: true,
       });
-      clickPath.addListener('click', () => selectRouteRef.current(i));
+
+      if (i === idx) {
+        const leg = result.routes[i]?.legs?.[0];
+        const duration = leg?.duration_in_traffic?.text || leg?.duration?.text || '--';
+        const distanceKm = leg?.distance?.text || '--';
+        const modeConfig = MODE_CONFIGS.find(m => m.key === selectedMode) || MODE_CONFIGS[0];
+        const labelHtml = `
+          <div style="background:linear-gradient(135deg,#fff 0%,#EFF6FF 100%);border-radius:12px;box-shadow:0 4px 16px rgba(26,115,232,0.18);padding:10px 14px;font-family:Inter,sans-serif;pointer-events:none;white-space:nowrap;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <img src="${modeConfig.icon}" style="width:20px;height:20px;object-fit:contain"/>
+              <span style="font-weight:700;font-size:14px;color:#122E63">${duration}</span>
+            </div>
+            <div style="font-size:13px;color:#374151">${distanceKm}</div>
+          </div>`;
+
+        clickPath.addListener('mousemove', (e) => {
+          clearPathClickLabel();
+          pathClickLabelRef.current = createRouteLabel(mapInstanceRef.current, e.latLng, labelHtml);
+        });
+        clickPath.addListener('mouseout', () => clearPathClickLabel());
+        clickPath.addListener('click', () => clearPathClickLabel());
+      } else {
+        clickPath.addListener('click', () => selectRouteRef.current(i));
+      }
 
       // Permanent label at route midpoint
       const path = route.overview_path;
@@ -372,8 +538,9 @@ const Direction = ({ showDetailsPanel = true }) => {
         traffic === 'Heavy traffic' || traffic === 'Moderate traffic'
       );
       if (!showDetailsPanel) {
+        // Add a clickable overlay for ETA label
         const labelContent = `
-          <div style="width:189.99635314941406px;height:101.90234375px;border-radius:10px;background:linear-gradient(90deg, #FFFFFF 0%, #A0DBFF 100%);box-shadow:0px 2px 2px 0px #00000040;display:flex;flex-direction:column;justify-content:center;padding:12px 16px;gap:8px;">
+          <div id="eta-label-overlay" style="width:189.99635314941406px;height:101.90234375px;border-radius:10px;background:linear-gradient(90deg, #FFFFFF 0%, #A0DBFF 100%);box-shadow:0px 2px 2px 0px #00000040;display:flex;flex-direction:column;justify-content:center;padding:12px 16px;gap:8px;cursor:pointer;">
             <div style="display:flex;align-items:center;gap:8px;">
               <img src="${carIcon}" style="width:18px;height:18px;object-fit:contain" />
               <span style="font-weight:600;color:#111827;font-size:14px;">${distance}</span>
@@ -383,7 +550,24 @@ const Direction = ({ showDetailsPanel = true }) => {
               <span style="font-weight:600;color:#111827;font-size:14px;">ETA: ${duration}</span>
             </div>
           </div>`;
-        const label = createRouteLabel(mapInstanceRef.current, midPoint, labelContent);
+        const etaClickHandler = () => {
+          if (typeof window.setActivePageGlobal === 'function') {
+            window.setActivePageGlobal('eta');
+          }
+          if (typeof window.setEtaTitleGlobal === 'function') {
+            window.setEtaTitleGlobal(`ETA: ${duration}`);
+          }
+          if (typeof window.setEtaDataGlobal === 'function') {
+            window.setEtaDataGlobal({
+              distance,
+              duration,
+              durationMinutes: trafficMins || freeMins,
+              traffic,
+              mode: selectedMode,
+            });
+          }
+        };
+        const label = createRouteLabel(mapInstanceRef.current, midPoint, labelContent, etaClickHandler);
         routeLabelsRef.current.push(label);
       }
 
@@ -395,7 +579,7 @@ const Direction = ({ showDetailsPanel = true }) => {
               <circle cx="24" cy="30" r="2.6" fill="#E53935" />
               <line x1="24" y1="14" x2="24" y2="26" stroke="#E53935" strokeWidth="4" strokeLinecap="round" />
             </svg>
-            <span style="font-weight:700;font-size:12px;color:#000000;">Traffic</span>
+            <span style="font-weight:700;font-size:12px;color:#000;white-space:nowrap;">Traffic</span>
           </div>`;
         const trafficOverlay = createRouteLabel(mapInstanceRef.current, midPoint, trafficLabel);
         routeLabelsRef.current.push(trafficOverlay);
@@ -602,10 +786,34 @@ const Direction = ({ showDetailsPanel = true }) => {
     }
   }, [selectedMode]);
 
+  const handleGpsSearch = useCallback(() => {
+    if (!navigator.geolocation) return;
+
+    if (navWatchIdRef.current != null) {
+      navigator.geolocation.clearWatch(navWatchIdRef.current);
+      navWatchIdRef.current = null;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        userLocationRef.current = loc;
+        applyOrigin(loc, 'Your location', true);
+        mapInstanceRef.current?.panTo(loc);
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
+  }, [applyOrigin]);
+
   useEffect(() => {
     ensureMapsScript(() => {
       const destLoc = (destPlace || searchedPlace)?.geometry?.location;
       const initialCenter = destLoc ? { lat: destLoc.lat(), lng: destLoc.lng() } : { lat: 7.8731, lng: 80.7718 };
+
+      // Clear pending values now that we've consumed them
+      if (pendingOriginLabel) setPendingOriginLabel('');
+      if (pendingVehicle) setPendingVehicle(null);
 
       mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
         center: initialCenter,
@@ -650,7 +858,8 @@ const Direction = ({ showDetailsPanel = true }) => {
             const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
             applyOrigin(loc, 'Your location', Boolean(destLoc));
           },
-          () => {}
+          () => {},
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
         );
       }
     });
@@ -779,11 +988,80 @@ const Direction = ({ showDetailsPanel = true }) => {
   };
 
   const handleAddStop = () => {
-    if (setActivePage) {
-      setActivePage('addStop');
-      setActionMessage('Opening stop planner.');
-    }
+    setAddStopOpen(true);
+    setStopQuery('');
+    setStopSuggestions([]);
+    setActiveCategory(null);
+    setStopPanelCollapsed(false);
+
+    ensureMapsScript(() => {
+      stopAutocompleteRef.current = new window.google.maps.places.AutocompleteService();
+      stopGeocoderRef.current = new window.google.maps.Geocoder();
+    });
   };
+
+  const fetchStopSuggestions = useCallback((input) => {
+    if (!input.trim()) { setStopSuggestions([]); return; }
+    const result = directionsResultRef.current;
+    if (!result || !mapInstanceRef.current) {
+      // No route yet — fall back to country-wide autocomplete
+      if (!stopAutocompleteRef.current) { setStopSuggestions([]); return; }
+      stopAutocompleteRef.current.getPlacePredictions(
+        { input, componentRestrictions: { country: 'lk' } },
+        (predictions, status) => {
+          setStopSuggestions(
+            status === window.google.maps.places.PlacesServiceStatus.OK && predictions ? predictions : []
+          );
+        }
+      );
+      return;
+    }
+
+    const path = result.routes[selectedIdx]?.overview_path || [];
+    if (!path.length) { setStopSuggestions([]); return; }
+
+    // Build a tight LatLngBounds around the route path
+    const bounds = new window.google.maps.LatLngBounds();
+    path.forEach((pt) => bounds.extend(pt));
+
+    // Use autocomplete biased to the route bounding box
+    if (!stopAutocompleteRef.current) { setStopSuggestions([]); return; }
+    stopAutocompleteRef.current.getPlacePredictions(
+      { input, bounds, strictBounds: true, componentRestrictions: { country: 'lk' } },
+      (predictions, status) => {
+        if (status !== window.google.maps.places.PlacesServiceStatus.OK || !predictions) {
+          setStopSuggestions([]);
+          return;
+        }
+        // Further filter: only keep predictions whose location is within 1km of the route
+        const geocoder = stopGeocoderRef.current;
+        if (!geocoder) { setStopSuggestions(predictions.slice(0, 5)); return; }
+        const filtered = [];
+        let remaining = predictions.length;
+        predictions.forEach((p) => {
+          geocoder.geocode({ placeId: p.place_id }, (geoResults, geoStatus) => {
+            if (geoStatus === 'OK' && geoResults?.[0]) {
+              const dist = getDistanceToPath(geoResults[0].geometry.location, path);
+              if (dist <= 1000) filtered.push(p);
+            }
+            remaining -= 1;
+            if (remaining === 0) setStopSuggestions(filtered.slice(0, 5));
+          });
+        });
+      }
+    );
+  }, [selectedIdx]);
+  useEffect(() => {
+    if (addStopOpen && activeCategory) searchPlacesAlongRoute(activeCategory);
+  }, [selectedIdx]);
+
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    const timer = setTimeout(() => {
+      window.google?.maps?.event?.trigger(mapInstanceRef.current, 'resize');
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [stopPanelCollapsed]);
 
   const baseModeMinutes = selectedMode === 'drive'
     ? (selectedRouteMinutes || drivingMinutesRef.current || 215)
@@ -793,17 +1071,46 @@ const Direction = ({ showDetailsPanel = true }) => {
   const bannerTitle = isStartPage
     ? (navInstruction ? `${navInstruction}${navDistance ? ` in ${navDistance}` : ''}` : 'Calculating route...')
     : (navInstruction || 'Calculating route...');
-  const mapHeight = showDetailsPanel ? '700px' : 'calc(100vh + 80px)';
+  const mapHeight = showDetailsPanel ? (addStopOpen && !stopPanelCollapsed ? '450px' : '900px') : 'calc(100vh + 80px)';
 
   return (
-    <div className="relative w-full bg-[#edf7ff]" style={{ minHeight: showDetailsPanel ? '500px' : mapHeight }}>
+    <div className="relative w-full bg-[#edf7ff]" style={{ minHeight: showDetailsPanel ? '50%' : mapHeight }}>
       <div className="absolute inset-0 z-0 opacity-40 pointer-events-none">
         <img src={middle} alt="Ocean background" className="w-full h-full object-cover scale-x-[1.7]" />
       </div>
 
       <div className="relative z-10 w-full">
-        <div className="relative w-full" style={{ height: mapHeight }}>
+        <div className="relative w-full" style={{ height: mapHeight, transition: 'height 0.35s ease' }}>
           <div ref={mapRef} className="h-full w-full shadow-[0_18px_50px_rgba(18,46,99,0.12)]" />
+          <div
+            className="absolute right-4 z-30"
+            style={{ bottom: '200px', pointerEvents: 'none' }}
+          >
+            <button
+              type="button"
+              onClick={handleGpsSearch}
+              aria-label="Use current location"
+              style={{
+                  pointerEvents: 'auto',
+                  width: '45px',
+                  height: '45px',
+                  borderRadius: '16px',
+                  border: 'none',
+                  background: '#1A73E8',
+                  boxShadow: '0 10px 24px rgba(26,115,232,0.28)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  position: 'absolute',        // anchor positioning
+                  right: '0px',                // stick to right corner
+                  bottom: 'var(--gps-margin, 8px)' // adjustable bottom margin
+      
+              }}
+            >
+              <img src={gpsIcon} alt="GPS search" style={{ width: '25px', height: '25px' }} />
+            </button>
+          </div>
           {!showDetailsPanel && (
             <div className="absolute left-1/2 top-6 z-20 w-[90%] max-w-[720px] -translate-x-1/2">
               <div className="flex items-center gap-4 rounded-2xl bg-white/95 px-5 py-4 shadow-lg backdrop-blur">
@@ -848,7 +1155,200 @@ const Direction = ({ showDetailsPanel = true }) => {
           </div>
         )}
 
-        {showDetailsPanel && (
+        {addStopOpen && (
+          <div style={{
+            width: '100%',
+            background: '#D7EEFD',
+            position: 'relative',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            maxHeight: stopPanelCollapsed ? '56px' : '2000px',
+            transition: 'max-height 0.4s cubic-bezier(0.4,0,0.2,1)',
+          }}>
+            {/* Slide handle icon */}
+            <div
+              onClick={() => setStopPanelCollapsed(c => !c)}
+              style={{ display: 'flex', justifyContent: 'center', paddingTop: '10px', marginBottom: '4px', cursor: 'pointer' }}
+            >
+              <svg
+                width="36" height="36" viewBox="0 0 24 24" fill="none"
+                stroke="#1A73E8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                style={{
+                  transition: 'transform 0.4s cubic-bezier(0.4,0,0.2,1)',
+                  transform: stopPanelCollapsed ? 'rotate(180deg)' : 'rotate(0deg)',
+                  filter: 'drop-shadow(0 1px 2px rgba(26,115,232,0.18))',
+                }}
+              >
+                <circle cx="12" cy="12" r="10" stroke="#1A73E8" strokeWidth="1.5" fill="#EFF6FF" />
+                <polyline points="8 11 12 15 16 11" />
+              </svg>
+            </div>
+            <div style={{ padding: '0 32px 24px' }}>
+            <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 600, fontSize: '20px', color: '#122E63', marginLeft: '4%' }}>
+              Add stop to your route
+            </span>
+
+            {/* Search bar */}
+            <div ref={stopContainerRef} style={{ position: 'relative', marginTop: '50px', marginLeft: '4%', marginBottom: '35px' }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                background: 'linear-gradient(135deg, #ffffff 0%, #A0DBFF 100%)',
+                borderRadius: '999px', padding: '10px 16px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.10)',
+                marginRight: '60%',
+              }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input
+                  type="text"
+                  value={stopQuery}
+                  onChange={(e) => { setStopQuery(e.target.value); setStopActiveIdx(-1); fetchStopSuggestions(e.target.value); }}
+                  onKeyDown={(e) => {
+                    if (!stopSuggestions.length) return;
+                    if (e.key === 'ArrowDown') { setStopActiveIdx(i => Math.min(i + 1, stopSuggestions.length - 1)); e.preventDefault(); }
+                    else if (e.key === 'ArrowUp') { setStopActiveIdx(i => Math.max(i - 1, -1)); e.preventDefault(); }
+                    else if (e.key === 'Escape') setStopSuggestions([]);
+                  }}
+                  placeholder="Search along route"
+                  style={{ flex: 1, border: 'none', outline: 'none', fontSize: '14px', color: '#333', background: 'transparent' }}
+                />
+                {stopQuery && (
+                  <svg onClick={() => { setStopQuery(''); setStopSuggestions([]); }} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ cursor: 'pointer', flexShrink: 0 }}>
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                )}
+              </div>
+
+              {stopSuggestions.length > 0 && (
+                <ul style={{
+                  position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+                  background: '#fff', borderRadius: '12px', boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+                  zIndex: 9999, listStyle: 'none', margin: 0, padding: '4px 0',
+                  maxHeight: '220px', overflowY: 'auto',
+                }}>
+                  {stopSuggestions.map((p, i) => (
+                    <li
+                      key={p.place_id}
+                      onMouseDown={() => { setStopQuery(p.structured_formatting.main_text); setStopSuggestions([]); }}
+                      onMouseEnter={() => setStopActiveIdx(i)}
+                      style={{
+                        padding: '10px 16px', cursor: 'pointer', fontSize: '14px', color: '#333',
+                        background: i === stopActiveIdx ? '#EFF6FF' : 'transparent',
+                        display: 'flex', alignItems: 'center', gap: '8px',
+                      }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" />
+                      </svg>
+                      <span>
+                        <strong>{p.structured_formatting.main_text}</strong>
+                        {p.structured_formatting.secondary_text && (
+                          <span style={{ color: '#6B7280', marginLeft: 4 }}>{p.structured_formatting.secondary_text}</span>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {/* Category menu bar */}
+            <div style={{ marginTop: '20px'}}>
+              <div style={{ display: 'flex', gap: '25%',marginLeft: '2%' }}>
+                {['Restaurant', 'Petrol Station', 'Coffee Shop', 'Supermarket'].map((item) => (
+                  <span
+                    key={item}
+                    onClick={() => { setActiveCategory(item); searchPlacesAlongRoute(item); }}
+                    style={{
+                      fontFamily: 'Inter, sans-serif',
+                      fontSize: '14px',
+                      fontWeight: activeCategory === item ? 700 : 500,
+                      color: activeCategory === item ? '#1A73E8' : '#122E63',
+                      cursor: 'pointer',
+                      paddingBottom: '10px',
+                      transition: 'color 0.15s, font-weight 0.15s',
+                    }}
+                  >
+                    {item}
+                  </span>
+                ))}
+              </div>
+              <div style={{ height: '2px', background: '#1A73E8', borderRadius: '1px' }} />
+            </div>
+
+            {/* Point of Interest */}
+            <span style={{
+              fontFamily: 'Inter, sans-serif',
+              fontSize: '15px',
+              fontWeight: 500,
+              color: '#122E63',
+              marginTop: '28px',
+              marginBottom: '20px',
+              display: 'block',
+            }}>
+              Point of Interest
+            </span>
+
+            {/* POI Results */}
+            {poiLoading && (
+              <p style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: '#1A73E8', marginLeft: '2%' }}>
+                Searching along route...
+              </p>
+            )}
+            {!poiLoading && activeCategory && poiResults.length === 0 && (
+              <p style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: '#6B7280', marginLeft: '2%' }}>
+                No {activeCategory.toLowerCase()} found along this route.
+              </p>
+            )}
+            {!poiLoading && poiResults.length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '16px', paddingBottom: '8px', marginLeft: '2%', maxHeight: '520px', overflowY: 'auto' }}>
+                {poiResults.map((place) => (
+                  <div key={place.placeId}
+                    onClick={() => {
+                      poiMarkersRef.current.forEach((m) => {
+                        const isSelected = m.getTitle() === place.name;
+                        m.setMap(isSelected ? mapInstanceRef.current : null);
+                        if (isSelected && mapInstanceRef.current) {
+                          mapInstanceRef.current.panTo(m.getPosition());
+                          mapInstanceRef.current.setZoom(16);
+                        }
+                      });
+                      setStopPanelCollapsed(true);
+                    }}
+                    style={{
+                      background: '#fff', borderRadius: '10px',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.10)',
+                      overflow: 'hidden', cursor: 'pointer',
+                    }}>
+                    {place.photo
+                      ? <img src={place.photo} alt={place.name} style={{ width: '100%', height: '120px', objectFit: 'cover' }} />
+                      : <div style={{ width: '100%', height: '120px', background: '#e0eeff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#1A73E8" strokeWidth="1.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                        </div>
+                    }
+                    <div style={{ padding: '8px 10px' }}>
+                      <p style={{ fontFamily: 'Inter, sans-serif', fontWeight: 600, fontSize: '13px', color: '#111', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{place.name}</p>
+                      {place.rating && <p style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: '#F5A623', margin: '4px 0 0' }}>{'★'.repeat(Math.round(place.rating))} {place.rating.toFixed(1)}</p>}
+                      <p style={{ fontFamily: 'Inter, sans-serif', fontSize: '11px', color: '#6B7280', margin: '4px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{place.vicinity}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            </div>
+            <button
+              onClick={() => { setAddStopOpen(false); clearPoiMarkers(); setPoiResults([]); setActiveCategory(null); }}
+              style={{ position: 'absolute', top: '16px', right: '16px', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+            >
+              <img src={closeIcon} alt="Close" style={{ width: '28px', height: '28px' }} />
+            </button>
+          </div>
+        )}
+
+        {showDetailsPanel && !addStopOpen && (
           <div style={{ maxWidth: '100%', margin: '0 auto', padding: 0 }}>
             {/* Slide toggle tab */}
             {!panelOpen && (
@@ -994,7 +1494,7 @@ const Direction = ({ showDetailsPanel = true }) => {
       )}
 
       {/* Location panel - inside map area, top right */}
-      {!isStartPage && (
+      {!isStartPage && !addStopOpen && (
         <div
           className="p-6 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg"
           style={{ position: 'absolute', top:'-70px', right: '64px', width: '880px', minHeight: '150px', zIndex: 50 }}
@@ -1002,13 +1502,26 @@ const Direction = ({ showDetailsPanel = true }) => {
           <div className="flex items-center gap-3 pb-4">
             <img src={swapped ? redPinIcon : blueLocationIcon} alt="Origin" className="w-5 h-5 shrink-0" />
             <LocationInput
-              placeholder="Choose starting point, or click on the map"
-              initialValue=''
+              placeholder="Your location"
+              initialValue={pendingOriginLabel || ''}
               onSelect={onOriginSelect}
               showGps
               gpsDisplayValue="Your Location"
               onGpsSelect={() => {
-                if (userLocationRef.current) applyOrigin(userLocationRef.current, 'Your location', true);
+                if (!navigator.geolocation) return;
+                if (navWatchIdRef.current != null) {
+                  navigator.geolocation.clearWatch(navWatchIdRef.current);
+                  navWatchIdRef.current = null;
+                }
+                navigator.geolocation.getCurrentPosition(
+                  (pos) => {
+                    const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                    userLocationRef.current = loc;
+                    applyOrigin(loc, 'Your location', true);
+                  },
+                  () => {},
+                  { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+                );
               }}
             />
           </div>

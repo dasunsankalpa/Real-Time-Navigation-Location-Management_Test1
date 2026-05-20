@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import Direction from './Direction';
+
 import { usePageTitle } from '../contexts/PageTitleContext';
+
 
 const StartPage = () => {
   const { setShowSearchBar } = usePageTitle();
@@ -13,4 +15,3 @@ const StartPage = () => {
 };
 
 export default StartPage;
-

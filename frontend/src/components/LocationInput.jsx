@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Search, MapPin, Navigation, Clock } from 'lucide-react';
+import { Search, MapPin, Clock } from 'lucide-react';
 import { useLocationSearch } from '../utils/useLocationSearch';
-import gpsSerch from '../assets/gpsSearch.png';
 
 
 const HISTORY_KEY = 'locationSearchHistory';
@@ -42,8 +41,8 @@ export default function LocationInput({
   const inputValue = staticValue != null ? staticValue : query;
   const allowDropdown = showDropdown && !readOnly && staticValue == null;
 
-  // Show pre-focus dropdown: GPS + history (only when query is empty and focused)
-  const showPrefocus = allowDropdown && focused && !query.trim() && (showGps || history.length > 0);
+  // Show pre-focus dropdown: history only (only when query is empty and focused)
+  const showPrefocus = allowDropdown && focused && !query.trim() && history.length > 0;
   // Show API suggestions while typing
   const showSuggestions = allowDropdown && suggestions.length > 0;
 
@@ -76,45 +75,13 @@ export default function LocationInput({
         </div>
       </div>
 
-      {/* Pre-focus dropdown: GPS + history */}
+      {/* Pre-focus dropdown: history only */}
       {showPrefocus && !showSuggestions && (
         <ul style={{
           position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0,
           background: '#fff', borderRadius: '10px', boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-          zIndex: 9999, listStyle: 'none', margin: 0, padding: '20px 0',
+          zIndex: 9999, listStyle: 'none', margin: 0, padding: '8px 0',
         }}>
-        {/* Your location row */}
-        {showGps && (
-          <li
-            onMouseDown={() => {
-              setQuery(gpsDisplayValue);
-              setFocused(false);
-              setSuggestions([]);
-              onGpsSelect?.();
-            }}
-            style={{
-              padding: '3px 10px 18px 10px',
-              cursor: 'pointer',
-              fontSize: '15px',
-              color: '#010101',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              borderBottom: history.length > 0 ? '1px solid #f0f0f0' : 'none',
-            }}
-          >
-            {/* Replace Navigation icon with gpsSearch.png */}
-            <img 
-              src={gpsSerch} 
-              alt="GPS" 
-              style={{ width: 30, height: 30 }} 
-            />
-            <span style={{ fontWeight: 600 }}>Your location</span>
-          </li>
-        )}
-
-
-          {/* History rows */}
           {history.map((h, i) => (
             <li
               key={i}
