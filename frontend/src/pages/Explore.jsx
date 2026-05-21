@@ -175,11 +175,16 @@ ensureMapsScript(() => {
           lng: position.coords.longitude,
         };
         setUserLocation(pos);
-        mapInstanceRef.current.setCenter(pos);
-        mapInstanceRef.current.setZoom(14);
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.setCenter(pos);
+          mapInstanceRef.current.setZoom(14);
+        }
         placeUserMarker(pos);
       },
-      () => {}
+      (error) => {
+        console.error("Error getting user location:", error);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   }
 });
@@ -547,5 +552,5 @@ ensureMapsScript(() => {
     </div>
   );
 };
-
+//new
 export default Explore;
