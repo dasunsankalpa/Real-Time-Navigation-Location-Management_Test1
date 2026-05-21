@@ -90,6 +90,13 @@ export default function Header() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  useEffect(() => {
+    if (activePage !== 'explore') return;
+
+    const destinationName = searchedPlace?.displayName || searchedPlace?.formatted_address?.split(',')[0] || '';
+    setQuery(destinationName);
+  }, [activePage, searchedPlace]);
+
   const startPageDestination = searchedPlace?.displayName || searchedPlace?.formatted_address?.split(',')[0] || '';
   const isStartPage = activePage === 'start';
   const isEtaPage = activePage === 'eta';

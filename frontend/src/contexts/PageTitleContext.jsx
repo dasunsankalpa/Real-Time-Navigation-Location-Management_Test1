@@ -20,6 +20,7 @@ export const PageTitleProvider = ({ children }) => {
   const [pendingOriginLabel, setPendingOriginLabel] = useState('');
   const [pendingVehicle, setPendingVehicle] = useState(null);
   const [etaData, setEtaData] = useState(null);
+  const [safetyData, setSafetyData] = useState(null);
   const onNavigateRef = useRef(null);
 
   const setOnNavigate = (fn) => { onNavigateRef.current = fn; };
@@ -40,6 +41,7 @@ export const PageTitleProvider = ({ children }) => {
       pendingOriginLabel, setPendingOriginLabel,
       pendingVehicle, setPendingVehicle,
       etaData, setEtaData,
+      safetyData, setSafetyData,
       setOnNavigate, navigateToSearch,
     }}>
       {children}

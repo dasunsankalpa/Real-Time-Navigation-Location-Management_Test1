@@ -140,7 +140,11 @@ const describeRoute = (route, idx, allRoutes) => {
 };
 
 const Direction = ({ showDetailsPanel = true }) => {
-  const { searchedPlace, userLocation, setActivePage, pendingOriginLabel, pendingVehicle, setPendingOriginLabel, setPendingVehicle, setTitle, setEtaData } = usePageTitle();
+  const { searchedPlace, userLocation, setActivePage, pendingOriginLabel, pendingVehicle, setPendingOriginLabel, setPendingVehicle, setTitle, setEtaData, setSearchedPlace, setSafetyData, setHasSearched } = usePageTitle();
+
+  useEffect(() => {
+    setTitle('');
+  }, [setTitle]);
 
   // Expose navigation and ETA setter globally for overlay click handler
   window.setActivePageGlobal = setActivePage;
@@ -187,6 +191,14 @@ const Direction = ({ showDetailsPanel = true }) => {
     'Supermarket':     { type: 'supermarket',   keyword: 'supermarket' },
   };
 
+  const POI_ATTRACTION_KEYWORDS = [
+    { type: 'tourist_attraction', keyword: 'historical site',      radius: 5000 },
+    { type: 'place_of_worship',   keyword: 'temple church mosque', radius: 5000 },
+    { type: 'museum',             keyword: 'museum cultural',      radius: 5000 },
+    { type: 'restaurant',         keyword: 'highly rated restaurant', radius: 500 },
+    { type: 'amusement_park',     keyword: 'fun park',             radius: 5000 },
+  ];
+
   const getDistanceToPath = (point, path) => {
     const R = 6371000;
     const toRad2 = (v) => (v * Math.PI) / 180;
@@ -222,13 +234,11 @@ const Direction = ({ showDetailsPanel = true }) => {
     setPoiResults([]);
     clearPoiMarkers();
 
-    // Scale sample count and radius based on route length
     const totalPoints = path.length;
     const sampleCount = Math.min(20, Math.max(8, Math.floor(totalPoints / 10)));
     const step = Math.max(1, Math.floor(totalPoints / sampleCount));
     const samplePoints = [];
     for (let i = 0; i < totalPoints; i += step) samplePoints.push(path[i]);
-    // Always include last point
     if (samplePoints[samplePoints.length - 1] !== path[totalPoints - 1]) {
       samplePoints.push(path[totalPoints - 1]);
     }
@@ -252,7 +262,7 @@ const Direction = ({ showDetailsPanel = true }) => {
                   name: place.name,
                   rating: place.rating || null,
                   vicinity: place.vicinity || '',
-                  photo: place.photos?.[0]?.getUrl({ maxWidth: 300 }) || null,
+                  photo: place.photos?.[0]?.getUrl({ maxWidth: 400, maxHeight: 400 }) || null,
                   placeId: place.place_id,
                   location: place.geometry.location,
                 });
@@ -280,6 +290,80 @@ const Direction = ({ showDetailsPanel = true }) => {
           }
         }
       );
+    });
+  }, [selectedIdx]);
+
+  const searchAttractionsAlongRoute = useCallback(() => {
+    const result = directionsResultRef.current;
+    if (!result || !mapInstanceRef.current) return;
+
+    const path = result.routes[selectedIdx]?.overview_path || [];
+    if (!path.length) return;
+
+    const totalPoints = path.length;
+    const sampleCount = Math.min(15, Math.max(6, Math.floor(totalPoints / 12)));
+    const step = Math.max(1, Math.floor(totalPoints / sampleCount));
+    const samplePoints = [];
+    for (let i = 0; i < totalPoints; i += step) samplePoints.push(path[i]);
+    if (samplePoints[samplePoints.length - 1] !== path[totalPoints - 1]) {
+      samplePoints.push(path[totalPoints - 1]);
+    }
+
+    setPoiLoading(true);
+    setPoiResults([]);
+    clearPoiMarkers();
+
+    const service = new window.google.maps.places.PlacesService(mapInstanceRef.current);
+    const seen = new Set();
+    const collected = [];
+    let pending = samplePoints.length * POI_ATTRACTION_KEYWORDS.length;
+
+    samplePoints.forEach((point) => {
+      POI_ATTRACTION_KEYWORDS.forEach(({ type, keyword, radius }) => {
+        service.nearbySearch(
+          { location: point, radius, type, keyword },
+          (results, status) => {
+            if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
+              results.forEach((place) => {
+                if (seen.has(place.place_id)) return;
+                const minRating = type === 'restaurant' ? 5.0 : 4.5;
+                if ((place.rating || 0) < minRating) return;
+                const dist = getDistanceToPath(place.geometry.location, path);
+                if (dist <= radius) {
+                  seen.add(place.place_id);
+                  collected.push({
+                    name: place.name,
+                    rating: place.rating || null,
+                    vicinity: place.vicinity || '',
+                    photo: place.photos?.[0]?.getUrl({ maxWidth: 400, maxHeight: 400 }) || null,
+                    placeId: place.place_id,
+                    location: place.geometry.location,
+                  });
+                }
+              });
+            }
+            pending -= 1;
+            if (pending === 0) {
+              const sorted = collected.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+              setPoiResults(sorted);
+              setPoiLoading(false);
+              sorted.forEach((place) => {
+                const marker = new window.google.maps.Marker({
+                  position: place.location,
+                  map: mapInstanceRef.current,
+                  title: place.name,
+                  icon: { url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png' },
+                });
+                const infoWindow = new window.google.maps.InfoWindow({
+                  content: `<div style="font-family:Inter,sans-serif;font-size:13px;max-width:160px"><strong>${place.name}</strong>${place.rating ? `<br/>⭐ ${place.rating.toFixed(1)}` : ''}<br/><span style="color:#6B7280;font-size:11px">${place.vicinity}</span></div>`,
+                });
+                marker.addListener('click', () => infoWindow.open(mapInstanceRef.current, marker));
+                poiMarkersRef.current.push(marker);
+              });
+            }
+          }
+        );
+      });
     });
   }, [selectedIdx]);
   const stopAutocompleteRef = useRef(null);
@@ -771,6 +855,7 @@ const Direction = ({ showDetailsPanel = true }) => {
 
   const onDestSelect = useCallback((place) => {
     setDestPlace(place);
+    setSearchedPlace(place);
     if (userLocationRef.current) {
       const loc = place.geometry.location;
       if (destMarkerRef.current) {
@@ -987,6 +1072,22 @@ const Direction = ({ showDetailsPanel = true }) => {
     }
   };
 
+  const handleSafetyAlert = () => {
+    const routePath = directionsResultRef.current?.routes?.[selectedIdx]?.overview_path || [];
+    if (typeof setSafetyData === 'function') {
+      setSafetyData({
+        origin: originLabel || userLocationRef.current || null,
+        destination,
+        mode: selectedMode,
+        routePath: routePath.map((point) => ({
+          lat: typeof point.lat === 'function' ? point.lat() : point.lat,
+          lng: typeof point.lng === 'function' ? point.lng() : point.lng,
+        })),
+      });
+    }
+    setActivePage && setActivePage('safety');
+  };
+
   const handleAddStop = () => {
     setAddStopOpen(true);
     setStopQuery('');
@@ -997,6 +1098,8 @@ const Direction = ({ showDetailsPanel = true }) => {
     ensureMapsScript(() => {
       stopAutocompleteRef.current = new window.google.maps.places.AutocompleteService();
       stopGeocoderRef.current = new window.google.maps.Geocoder();
+      // Auto-load high-rated attractions along the route
+      searchAttractionsAlongRoute();
     });
   };
 
@@ -1140,7 +1243,10 @@ const Direction = ({ showDetailsPanel = true }) => {
           <div className="flex items-center justify-center" style={{ marginTop: '150px', marginBottom: '150px', gap: '200px' }}>
             <button
               type="button"
-              onClick={() => setActivePage && setActivePage('direction')}
+              onClick={() => {
+                setHasSearched(true);
+                setActivePage && setActivePage('explore');
+              }}
               className="rounded-xl bg-[#e53e3e] px-10 py-3 text-base font-semibold text-white hover:bg-[#c53030]"
             >
               Cancel
@@ -1297,13 +1403,13 @@ const Direction = ({ showDetailsPanel = true }) => {
                 Searching along route...
               </p>
             )}
-            {!poiLoading && activeCategory && poiResults.length === 0 && (
+            {!poiLoading && poiResults.length === 0 && (
               <p style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: '#6B7280', marginLeft: '2%' }}>
-                No {activeCategory.toLowerCase()} found along this route.
+                {activeCategory ? `No ${activeCategory.toLowerCase()} found along this route.` : 'No attractions found within 2 km of your route.'}
               </p>
             )}
             {!poiLoading && poiResults.length > 0 && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '16px', paddingBottom: '8px', marginLeft: '2%', maxHeight: '520px', overflowY: 'auto' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '16px', paddingBottom: '8px', marginLeft: '2%', maxHeight: '520px', overflowY: 'auto' }}>
                 {poiResults.map((place) => (
                   <div key={place.placeId}
                     onClick={() => {
@@ -1322,12 +1428,17 @@ const Direction = ({ showDetailsPanel = true }) => {
                       boxShadow: '0 2px 8px rgba(0,0,0,0.10)',
                       overflow: 'hidden', cursor: 'pointer',
                     }}>
-                    {place.photo
-                      ? <img src={place.photo} alt={place.name} style={{ width: '100%', height: '120px', objectFit: 'cover' }} />
-                      : <div style={{ width: '100%', height: '120px', background: '#e0eeff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#1A73E8" strokeWidth="1.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                        </div>
-                    }
+                    <div style={{ width: '100%', height: '160px', overflow: 'hidden', flexShrink: 0 }}>
+                      {place.photo
+                        ? <img src={place.photo} alt={place.name}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                            onError={(e) => { e.target.style.display = 'none'; e.target.parentNode.style.background = '#e0eeff'; e.target.parentNode.innerHTML = '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#1A73E8" stroke-width="1.5" style="margin:auto;display:block;margin-top:64px"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>'; }}
+                          />
+                        : <div style={{ width: '100%', height: '100%', background: '#e0eeff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#1A73E8" strokeWidth="1.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                          </div>
+                      }
+                    </div>
                     <div style={{ padding: '8px 10px' }}>
                       <p style={{ fontFamily: 'Inter, sans-serif', fontWeight: 600, fontSize: '13px', color: '#111', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{place.name}</p>
                       {place.rating && <p style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: '#F5A623', margin: '4px 0 0' }}>{'★'.repeat(Math.round(place.rating))} {place.rating.toFixed(1)}</p>}
