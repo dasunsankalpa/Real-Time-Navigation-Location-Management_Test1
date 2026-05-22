@@ -1,14 +1,25 @@
 const express = require('express');
-const mongoose = require('mongoose');
 const dotenv = require('dotenv');
+const connectDB = require('./src/config/database');
+const serviceRouter = require('./src/routes/serviceRouter');
+
+dotenv.config(); // use values from .env before reading environment variables
+
 const app = express();
 const PORT = process.env.PORT || 5000;
-
-
-
-dotenv.config(); //use to access the values in .env file
 // Middleware
 app.use(express.json());
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
 
 // Routes
 app.get('/', (req, res) => {
@@ -19,17 +30,21 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'Server is running' });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
-});
+app.use('/api/recent-places', serviceRouter);
 
-//db connection
-let mongoUrl = process.env.MONGO_URL;
-mongoose.connect(mongoUrl);
+// Start server after MongoDB connects
+const startServer = async () => {
+  try {
+    await connectDB();
 
-let connection =  mongoose.connection
-connection.once("open", ()=>{
-    console.log("MongoDB connected successfully")
-});
+    app.listen(PORT, () => {
+      console.log(`Server is running on http://localhost:${PORT}`);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+startServer();
 

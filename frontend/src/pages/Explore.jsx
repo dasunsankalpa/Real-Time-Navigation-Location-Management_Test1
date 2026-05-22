@@ -8,6 +8,7 @@ import directionIcon from '../assets/directionIcon.png';
 import directionImg from '../assets/direction.png';
 import { usePageTitle } from '../contexts/PageTitleContext';
 import { ensureMapsScript } from '../utils/helpers';
+import { fetchRecentPlaces, saveRecentPlace } from '../services/api';
 
 const USER_LOCATION = { lat: 7.8731, lng: 80.7718 }; // Sri Lanka center
 
@@ -16,6 +17,7 @@ const Explore = () => {
   const mapInstanceRef = useRef(null);
   const markerRef = useRef(null);
   const userMarkerRef = useRef(null);
+  const lastHandledPlaceKeyRef = useRef('');
 
   const { setShowSearchBar, setOnNavigate, hasSearched, setHasSearched, searchedPlace, setActivePage, setUserLocation } = usePageTitle();
   const [localSearched, setLocalSearched] = useState(false);
@@ -25,9 +27,29 @@ const Explore = () => {
   const [showUserPopup, setShowUserPopup] = useState(false);
   const [selectedSavedPlaceTab, setSelectedSavedPlaceTab] = useState('home');
   const [hoveredSavedPlaceTab, setHoveredSavedPlaceTab] = useState(null);
+  const [recentPlaces, setRecentPlaces] = useState([]);
+  const [recentPlacesLoading, setRecentPlacesLoading] = useState(false);
+  const [recentPlacesError, setRecentPlacesError] = useState('');
   const userDisplayName = (typeof window !== 'undefined' && (window.localStorage.getItem('userName') || window.localStorage.getItem('displayName'))) || 'nethmi';
 
+  const getPlaceKey = useCallback((place) => {
+    const placeId = place?.place_id || place?.placeId || '';
+    const name = place?.displayName || place?.name || place?.formatted_address?.split(',')[0] || '';
+    const lat = typeof place?.geometry?.location?.lat === 'function' ? place.geometry.location.lat() : place?.geometry?.location?.lat;
+    const lng = typeof place?.geometry?.location?.lng === 'function' ? place.geometry.location.lng() : place?.geometry?.location?.lng;
+    return placeId || `${name}:${lat ?? ''}:${lng ?? ''}`;
+  }, []);
+
   const handleNavigate = useCallback((place) => {
+    const placeKey = getPlaceKey(place);
+    if (placeKey && lastHandledPlaceKeyRef.current === placeKey) return;
+
+    if (placeKey) {
+      lastHandledPlaceKeyRef.current = placeKey;
+    }
+
+    void saveRecentPlace(place, null);
+
     if (!mapInstanceRef.current || !place.geometry?.location) return;
     mapInstanceRef.current.panTo(place.geometry.location);
     mapInstanceRef.current.setZoom(13);
@@ -54,13 +76,20 @@ const Explore = () => {
           .sort((a, b) => (b.rating * (b.user_ratings_total || 0)) - (a.rating * (a.user_ratings_total || 0)));
         const urls = sorted.slice(0, 3).map(r => r.photos[0].getUrl({ maxWidth: 1600, maxHeight: 1200 }));
         setPlacePhotos(urls.length > 0 ? urls : []);
+        if (urls.length > 0) {
+          void saveRecentPlace(place, null, undefined, urls.slice(0, 2));
+        }
       } else if (place.photos && place.photos.length > 0) {
         const sorted = [...place.photos].sort((a, b) => {
           const aRatio = a.width / a.height;
           const bRatio = b.width / b.height;
           return Math.abs(aRatio - 1.5) - Math.abs(bRatio - 1.5);
         });
-        setPlacePhotos(sorted.slice(0, 3).map(p => p.getUrl({ maxWidth: 1600, maxHeight: 1200 })));
+        const urls = sorted.slice(0, 3).map(p => p.getUrl({ maxWidth: 1600, maxHeight: 1200 }));
+        setPlacePhotos(urls);
+        if (urls.length > 0) {
+          void saveRecentPlace(place, null, undefined, urls.slice(0, 2));
+        }
       } else {
         setPlacePhotos([]);
       }
@@ -121,7 +150,95 @@ const Explore = () => {
         setNearbyHotels([]);
       }
     });
-  }, [setHasSearched]);
+  }, [getPlaceKey, setHasSearched]);
+
+  const handleExploreAction = useCallback(() => {
+    if (!searchedPlace) return;
+    void saveRecentPlace(searchedPlace, 'Got Direction');
+    setActivePage('direction');
+  }, [searchedPlace, setActivePage]);
+
+  useEffect(() => {
+    if (!showUserPopup) return;
+
+    let isActive = true;
+
+    const loadRecentPlaces = async () => {
+      setRecentPlacesLoading(true);
+      setRecentPlacesError('');
+
+      try {
+        const response = await fetchRecentPlaces(undefined, 12);
+        if (!isActive) return;
+
+        const items = Array.isArray(response?.data) ? response.data : [];
+        setRecentPlaces(items);
+      } catch (error) {
+        if (!isActive) return;
+        setRecentPlacesError('Failed to load recent places');
+        setRecentPlaces([]);
+      } finally {
+        if (isActive) setRecentPlacesLoading(false);
+      }
+    };
+
+    loadRecentPlaces();
+
+    return () => {
+      isActive = false;
+    };
+  }, [showUserPopup]);
+
+  const getRecentPlaceImages = (place) => {
+    const storedImages = Array.isArray(place?.imageUrls) ? place.imageUrls.filter(Boolean).slice(0, 2) : [];
+
+    if (storedImages.length > 0) {
+      return storedImages;
+    }
+
+    return place?.imageUrl ? [place.imageUrl] : [];
+  };
+
+  const renderRecentPlaceMedia = (place) => {
+    const images = getRecentPlaceImages(place);
+
+    if (images.length === 0) {
+      return (
+        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Inter, sans-serif', fontSize: '12px', color: '#6B7280', textAlign: 'center', padding: '8px' }}>
+          No image
+        </div>
+      );
+    }
+
+    if (images.length === 1) {
+      return (
+        <img
+          src={images[0]}
+          alt={place?.name || 'Recent place'}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
+      );
+    }
+
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', gap: '0px', background: '#E5E7EB' }}>
+        <div style={{ width: '50%', height: '100%', overflow: 'hidden' }}>
+          <img
+            src={images[0]}
+            alt={place?.name || 'Recent place'}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+        </div>
+        <div style={{ width: '50%', height: '100%', overflow: 'hidden' }}>
+          <img
+            src={images[1]}
+            alt={place?.name || 'Recent place'}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+        </div>
+      </div>
+    );
+  };
 
   useEffect(() => {
     setShowSearchBar(true);
@@ -288,7 +405,7 @@ ensureMapsScript(() => {
                   {[{ label: 'Direction', icon: directionImg }, { label: 'Start', icon: null }, { label: 'Save', icon: null }, { label: 'Share', icon: null }].map(({ label, icon }) => (
                     <button
                       key={label}
-                      onClick={() => label === 'Direction' && setActivePage('direction')}
+                      onClick={() => (label === 'Direction' || label === 'Start') ? handleExploreAction() : undefined}
                       style={{
                         padding: '14px 28px',
                         borderRadius: '6px',
@@ -537,6 +654,47 @@ ensureMapsScript(() => {
                 </div>
                 <div style={{ marginTop: '40px',marginLeft: '65px', fontFamily: 'Inter, sans-serif', fontSize: '16px', fontWeight: 500, color: '#1F2937' }}>
                   Your Recent Places
+                </div>
+                <div style={{ marginTop: '20px', marginLeft: '40px', marginRight: '40px', maxHeight: '520px', overflowY: 'auto', paddingRight: '8px' }}>
+                  {recentPlacesLoading && (
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', color: '#374151' }}>
+                      Loading recent places...
+                    </div>
+                  )}
+
+                  {!recentPlacesLoading && recentPlacesError && (
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', color: '#B91C1C' }}>
+                      {recentPlacesError}
+                    </div>
+                  )}
+
+                  {!recentPlacesLoading && !recentPlacesError && recentPlaces.length === 0 && (
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', color: '#374151' }}>
+                      No recent places found.
+                    </div>
+                  )}
+
+                  {!recentPlacesLoading && !recentPlacesError && recentPlaces.length > 0 && (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '26px 44px' }}>
+                      {recentPlaces.map((place) => {
+                        const placeName = place?.name || 'Unknown place';
+                        const actionLabel = place?.action || 'Viewed';
+
+                        return (
+                          <div key={place._id} style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                            <div style={{ width: '102px', height: '102px', borderRadius: '16px', overflow: 'hidden', background: '#E5E7EB', flexShrink: 0, boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}>
+                              {renderRecentPlaceMedia(place)}
+                            </div>
+
+                            <div style={{ fontFamily: 'Inter, sans-serif', color: '#111827', lineHeight: 1.2 }}>
+                              <div style={{ fontSize: '16px', fontWeight: 500 }}>{placeName}</div>
+                              <div style={{ fontSize: '13px', marginTop: '4px' }}>{place.action === 'Got Direction' ? 'Got Direction' : 'Viewed'}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
