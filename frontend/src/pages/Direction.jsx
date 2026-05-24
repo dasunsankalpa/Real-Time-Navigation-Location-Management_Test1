@@ -25,6 +25,13 @@ const MODE_CONFIGS = [
   { key: 'walk', label: 'Walk', icon: manIcon, travelMode: 'WALKING', multiplier: 8.5 },
 ];
 
+const SRI_LANKA_BOUNDS = {
+  north: 10.0,
+  south: 5.7,
+  east: 82.1,
+  west: 79.4,
+};
+
 const parseDurationToMinutes = (durationText = '') => {
   const normalized = durationText.toLowerCase();
   const dayMatch = normalized.match(/(\d+)\s*day/);
@@ -140,11 +147,16 @@ const describeRoute = (route, idx, allRoutes) => {
 };
 
 const Direction = ({ showDetailsPanel = true }) => {
-  const { searchedPlace, userLocation, setActivePage, pendingOriginLabel, pendingVehicle, setPendingOriginLabel, setPendingVehicle, setTitle, setEtaData, setSearchedPlace, setSafetyData, setHasSearched } = usePageTitle();
+  const { searchedPlace, userLocation, setActivePage, pendingOriginLabel, pendingVehicle, setPendingOriginLabel, setPendingVehicle, setTitle, setEtaData, setSearchedPlace, setSafetyData, setHasSearched, setShowSearchBar } = usePageTitle();
 
   useEffect(() => {
     setTitle('');
   }, [setTitle]);
+
+  useEffect(() => {
+    setShowSearchBar(!showDetailsPanel);
+    return () => setShowSearchBar(false);
+  }, [setShowSearchBar, showDetailsPanel]);
 
   // Expose navigation and ETA setter globally for overlay click handler
   window.setActivePageGlobal = setActivePage;
@@ -192,11 +204,7 @@ const Direction = ({ showDetailsPanel = true }) => {
   };
 
   const POI_ATTRACTION_KEYWORDS = [
-    { type: 'tourist_attraction', keyword: 'historical site',      radius: 5000 },
-    { type: 'place_of_worship',   keyword: 'temple church mosque', radius: 5000 },
-    { type: 'museum',             keyword: 'museum cultural',      radius: 5000 },
-    { type: 'restaurant',         keyword: 'highly rated restaurant', radius: 500 },
-    { type: 'amusement_park',     keyword: 'fun park',             radius: 5000 },
+    { type: 'tourist_attraction', keyword: 'tourist attraction',   radius: 2000 },
   ];
 
   const getDistanceToPath = (point, path) => {
@@ -217,6 +225,45 @@ const Direction = ({ showDetailsPanel = true }) => {
     return minDist;
   };
 
+  const getNavigationMarkerIcon = () => ({
+    url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(`
+      <svg xmlns='http://www.w3.org/2000/svg' width='34' height='34' viewBox='0 0 34 34'>
+        <path d='M17 2 L28 32 L17 25 L6 32 Z' fill='#1A73E8' stroke='#ffffff' stroke-width='2' stroke-linejoin='round'/>
+      </svg>
+    `),
+    scaledSize: new window.google.maps.Size(34, 34),
+    anchor: new window.google.maps.Point(17, 17),
+  });
+
+  const addPoiMarker = (place) => {
+    if (!mapInstanceRef.current || !place?.location) return;
+
+    const existingMarker = poiMarkersRef.current.find((marker) => marker.__placeId === place.placeId);
+    if (existingMarker) {
+      mapInstanceRef.current.panTo(existingMarker.getPosition());
+      mapInstanceRef.current.setZoom(16);
+      return;
+    }
+
+    const marker = new window.google.maps.Marker({
+      position: place.location,
+      map: mapInstanceRef.current,
+      title: place.name,
+      icon: { url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png' },
+    });
+
+    marker.__placeId = place.placeId;
+
+    const infoWindow = new window.google.maps.InfoWindow({
+      content: `<div style="font-family:Inter,sans-serif;font-size:13px;max-width:160px"><strong>${place.name}</strong>${place.rating ? `<br/>⭐ ${place.rating.toFixed(1)}` : ''}<br/><span style="color:#6B7280;font-size:11px">${place.vicinity}</span></div>`,
+    });
+
+    marker.addListener('click', () => infoWindow.open(mapInstanceRef.current, marker));
+    poiMarkersRef.current.push(marker);
+    mapInstanceRef.current.panTo(place.location);
+    mapInstanceRef.current.setZoom(16);
+  };
+
   const searchPlacesAlongRoute = useCallback((category) => {
     const result = directionsResultRef.current;
     if (!result || !mapInstanceRef.current) return;
@@ -232,7 +279,6 @@ const Direction = ({ showDetailsPanel = true }) => {
 
     setPoiLoading(true);
     setPoiResults([]);
-    clearPoiMarkers();
 
     const totalPoints = path.length;
     const sampleCount = Math.min(20, Math.max(8, Math.floor(totalPoints / 10)));
@@ -274,19 +320,6 @@ const Direction = ({ showDetailsPanel = true }) => {
             const sorted = collected.sort((a, b) => (b.rating || 0) - (a.rating || 0));
             setPoiResults(sorted);
             setPoiLoading(false);
-            sorted.forEach((place) => {
-              const marker = new window.google.maps.Marker({
-                position: place.location,
-                map: mapInstanceRef.current,
-                title: place.name,
-                icon: { url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png' },
-              });
-              const infoWindow = new window.google.maps.InfoWindow({
-                content: `<div style="font-family:Inter,sans-serif;font-size:13px;max-width:160px"><strong>${place.name}</strong>${place.rating ? `<br/>⭐ ${place.rating.toFixed(1)}` : ''}<br/><span style="color:#6B7280;font-size:11px">${place.vicinity}</span></div>`,
-              });
-              marker.addListener('click', () => infoWindow.open(mapInstanceRef.current, marker));
-              poiMarkersRef.current.push(marker);
-            });
           }
         }
       );
@@ -311,7 +344,6 @@ const Direction = ({ showDetailsPanel = true }) => {
 
     setPoiLoading(true);
     setPoiResults([]);
-    clearPoiMarkers();
 
     const service = new window.google.maps.places.PlacesService(mapInstanceRef.current);
     const seen = new Set();
@@ -326,7 +358,7 @@ const Direction = ({ showDetailsPanel = true }) => {
             if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
               results.forEach((place) => {
                 if (seen.has(place.place_id)) return;
-                const minRating = type === 'restaurant' ? 5.0 : 4.5;
+                const minRating = 4.5;
                 if ((place.rating || 0) < minRating) return;
                 const dist = getDistanceToPath(place.geometry.location, path);
                 if (dist <= radius) {
@@ -347,19 +379,6 @@ const Direction = ({ showDetailsPanel = true }) => {
               const sorted = collected.sort((a, b) => (b.rating || 0) - (a.rating || 0));
               setPoiResults(sorted);
               setPoiLoading(false);
-              sorted.forEach((place) => {
-                const marker = new window.google.maps.Marker({
-                  position: place.location,
-                  map: mapInstanceRef.current,
-                  title: place.name,
-                  icon: { url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png' },
-                });
-                const infoWindow = new window.google.maps.InfoWindow({
-                  content: `<div style="font-family:Inter,sans-serif;font-size:13px;max-width:160px"><strong>${place.name}</strong>${place.rating ? `<br/>⭐ ${place.rating.toFixed(1)}` : ''}<br/><span style="color:#6B7280;font-size:11px">${place.vicinity}</span></div>`,
-                });
-                marker.addListener('click', () => infoWindow.open(mapInstanceRef.current, marker));
-                poiMarkersRef.current.push(marker);
-              });
             }
           }
         );
@@ -461,6 +480,40 @@ const Direction = ({ showDetailsPanel = true }) => {
     const s2 = Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
     const c = 2 * Math.atan2(Math.sqrt(s1 + s2), Math.sqrt(1 - (s1 + s2)));
     return R * c;
+  };
+
+  const formatManeuver = (step) => {
+    if (!step) return '';
+
+    const maneuver = (step.maneuver || '').replace(/_/g, ' ').trim();
+    if (maneuver) {
+      return maneuver.charAt(0).toUpperCase() + maneuver.slice(1);
+    }
+
+    const raw = sanitizeInstruction(step.instructions || step.html_instructions || '');
+    if (!raw) return '';
+
+    const lower = raw.toLowerCase();
+    if (lower.startsWith('head ') || lower.startsWith('continue') || lower.startsWith('keep ')) {
+      return '';
+    }
+
+    return raw;
+  };
+
+  const getActiveManeuverStep = () => {
+    const steps = directionsResultRef.current?.routes?.[selectedIdx]?.legs?.[0]?.steps || [];
+    if (!steps.length) return null;
+
+    const idx = Math.min(navStepIndex, steps.length - 1);
+    const currentStep = steps[idx];
+    const currentLabel = formatManeuver(currentStep);
+    if (currentLabel) return { step: currentStep, label: currentLabel };
+
+    const lookAhead = steps.slice(idx + 1).find((step) => formatManeuver(step));
+    if (lookAhead) return { step: lookAhead, label: formatManeuver(lookAhead) };
+
+    return { step: currentStep, label: sanitizeInstruction(currentStep.instructions || currentStep.html_instructions || 'Continue') };
   };
 
   const updateNavigation = useCallback((loc, forcedIndex = null) => {
@@ -821,18 +874,14 @@ const Direction = ({ showDetailsPanel = true }) => {
   const placeOriginMarker = (loc) => {
     if (originMarkerRef.current) {
       originMarkerRef.current.setPosition(loc);
+      originMarkerRef.current.setIcon(getNavigationMarkerIcon());
+      originMarkerRef.current.setMap(mapInstanceRef.current);
     } else {
       originMarkerRef.current = new window.google.maps.Marker({
         position: loc,
         map: mapInstanceRef.current,
-        icon: {
-          path: window.google.maps.SymbolPath.CIRCLE,
-          scale: 10,
-          fillColor: '#104bc0',
-          fillOpacity: 1,
-          strokeColor: '#fff',
-          strokeWeight: 2,
-        },
+        icon: getNavigationMarkerIcon(),
+        zIndex: 999,
       });
     }
   };
@@ -840,13 +889,17 @@ const Direction = ({ showDetailsPanel = true }) => {
   const applyOrigin = useCallback((loc, label, fireRoute = true) => {
     userLocationRef.current = loc;
     setOriginLabel(label);
-    placeOriginMarker(loc);
+    if (!showDetailsPanel) {
+      placeOriginMarker(loc);
+    } else if (originMarkerRef.current) {
+      originMarkerRef.current.setMap(null);
+    }
     if (fireRoute) {
       originChosenRef.current = true;
       const dest = destPlace || searchedPlace;
       requestDirections(loc, dest?.geometry?.location || destination, selectedMode);
     }
-  }, [selectedMode, destPlace, searchedPlace, destination]);
+  }, [showDetailsPanel, selectedMode, destPlace, searchedPlace, destination]);
 
   const onOriginSelect = useCallback((place) => {
     const loc = { lat: place.geometry.location.lat(), lng: place.geometry.location.lng() };
@@ -903,6 +956,10 @@ const Direction = ({ showDetailsPanel = true }) => {
       mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
         center: initialCenter,
         zoom: destLoc ? 12 : 7,
+        restriction: {
+          latLngBounds: SRI_LANKA_BOUNDS,
+          strictBounds: true,
+        },
         mapTypeControl: false,
         streetViewControl: false,
         fullscreenControl: false,
@@ -1066,11 +1123,36 @@ const Direction = ({ showDetailsPanel = true }) => {
   };
 
   const handleStart = () => {
+    setShowSearchBar(true);
     if (setActivePage) {
       setActivePage('start');
       setActionMessage('Opening start page.');
     }
   };
+
+  const focusJourneyStart = useCallback(() => {
+    if (!mapInstanceRef.current) return;
+
+    const startLocation = originMarkerRef.current?.getPosition()
+      || userLocationRef.current
+      || activeRoutePairRef.current.origin;
+
+    if (!startLocation) return;
+
+    mapInstanceRef.current.panTo(startLocation);
+    mapInstanceRef.current.setZoom(16);
+  }, []);
+
+  useEffect(() => {
+    if (!showDetailsPanel) {
+      if (userLocationRef.current) {
+        placeOriginMarker(userLocationRef.current);
+      }
+      focusJourneyStart();
+    } else if (originMarkerRef.current) {
+      originMarkerRef.current.setMap(null);
+    }
+  }, [showDetailsPanel, focusJourneyStart]);
 
   const handleSafetyAlert = () => {
     const routePath = directionsResultRef.current?.routes?.[selectedIdx]?.overview_path || [];
@@ -1170,6 +1252,9 @@ const Direction = ({ showDetailsPanel = true }) => {
     ? (selectedRouteMinutes || drivingMinutesRef.current || 215)
     : (drivingMinutesRef.current || selectedRouteMinutes || 215);
 
+  const activeManeuver = getActiveManeuverStep();
+  const currentTurnInstruction = activeManeuver?.label || '';
+
   const isStartPage = !showDetailsPanel;
   const bannerTitle = isStartPage
     ? (navInstruction ? `${navInstruction}${navDistance ? ` in ${navDistance}` : ''}` : 'Calculating route...')
@@ -1177,9 +1262,9 @@ const Direction = ({ showDetailsPanel = true }) => {
   const mapHeight = showDetailsPanel ? (addStopOpen && !stopPanelCollapsed ? '450px' : '900px') : 'calc(100vh + 80px)';
 
   return (
-    <div className="relative w-full bg-[#edf7ff]" style={{ minHeight: showDetailsPanel ? '50%' : mapHeight }}>
-      <div className="absolute inset-0 z-0 opacity-40 pointer-events-none">
-        <img src={middle} alt="Ocean background" className="w-full h-full object-cover scale-x-[1.7]" />
+    <div className="relative w-full overflow-hidden bg-[#edf7ff]" style={{ minHeight: '100vh' }}>
+      <div className="fixed inset-0 z-0 opacity-40 pointer-events-none">
+        <img src={middle} alt="Ocean background" className="h-full w-full object-cover scale-x-[1.7]" />
       </div>
 
       <div className="relative z-10 w-full">
@@ -1229,6 +1314,11 @@ const Direction = ({ showDetailsPanel = true }) => {
                   {isStartPage && destination && !navArrived && (
                     <span className="text-sm text-slate-500">To {destination}</span>
                   )}
+                  {isStartPage && currentTurnInstruction && !navArrived && (
+                    <span className="text-sm font-medium text-slate-600">
+                      {currentTurnInstruction}{navDistance ? ` in ${navDistance}` : ''}
+                    </span>
+                  )}
                   {!isStartPage && navDistance && !navArrived && (
                     <span className="text-sm text-slate-500">in {navDistance}</span>
                   )}
@@ -1240,23 +1330,26 @@ const Direction = ({ showDetailsPanel = true }) => {
 
 
         {!showDetailsPanel && (
-          <div className="flex items-center justify-center" style={{ marginTop: '150px', marginBottom: '150px', gap: '200px' }}>
+          <div className="flex items-center justify-center" style={{ marginTop: '150px', marginBottom: '150px', gap: '260px' }}>
             <button
               type="button"
               onClick={() => {
                 setHasSearched(true);
                 setActivePage && setActivePage('explore');
               }}
-              className="rounded-xl bg-[#e53e3e] px-10 py-3 text-base font-semibold text-white hover:bg-[#c53030]"
+              className="rounded-xl bg-[#e53e3e] px-12 py-4 text-lg font-semibold text-white hover:bg-[#c53030]"
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={() => setActivePage && setActivePage('safety')}
-              className="rounded-xl bg-[#1A73E8] px-10 py-3 text-base font-semibold text-white hover:bg-[#165fbe]"
+              className="flex items-center gap-4 rounded-[14px] bg-[#FFD84D] px-8 py-5 text-lg font-extrabold text-white shadow-[0_8px_18px_rgba(0,0,0,0.18)] transition-transform duration-150 hover:scale-[1.01] hover:bg-[#ffcf2e]"
             >
-              Safety Alert
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#E31B23] text-[18px] leading-none text-white shadow-[0_2px_4px_rgba(0,0,0,0.2)]">
+                !
+              </span>
+              <span>Safety Alert</span>
             </button>
           </div>
         )}
@@ -1413,14 +1506,7 @@ const Direction = ({ showDetailsPanel = true }) => {
                 {poiResults.map((place) => (
                   <div key={place.placeId}
                     onClick={() => {
-                      poiMarkersRef.current.forEach((m) => {
-                        const isSelected = m.getTitle() === place.name;
-                        m.setMap(isSelected ? mapInstanceRef.current : null);
-                        if (isSelected && mapInstanceRef.current) {
-                          mapInstanceRef.current.panTo(m.getPosition());
-                          mapInstanceRef.current.setZoom(16);
-                        }
-                      });
+                      addPoiMarker(place);
                       setStopPanelCollapsed(true);
                     }}
                     style={{
@@ -1451,7 +1537,7 @@ const Direction = ({ showDetailsPanel = true }) => {
 
             </div>
             <button
-              onClick={() => { setAddStopOpen(false); clearPoiMarkers(); setPoiResults([]); setActiveCategory(null); }}
+              onClick={() => { setAddStopOpen(false); setPoiResults([]); setActiveCategory(null); }}
               style={{ position: 'absolute', top: '16px', right: '16px', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
             >
               <img src={closeIcon} alt="Close" style={{ width: '28px', height: '28px' }} />

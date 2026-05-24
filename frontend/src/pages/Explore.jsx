@@ -7,7 +7,7 @@ import user from '../assets/user.png';
 import directionIcon from '../assets/directionIcon.png';
 import directionImg from '../assets/direction.png';
 import { usePageTitle } from '../contexts/PageTitleContext';
-import { ensureMapsScript } from '../utils/helpers';
+import { ensureMapsScript, formatViewedAgo } from '../utils/helpers';
 import { fetchRecentPlaces, saveRecentPlace } from '../services/api';
 
 const USER_LOCATION = { lat: 7.8731, lng: 80.7718 }; // Sri Lanka center
@@ -168,7 +168,7 @@ const Explore = () => {
       setRecentPlacesError('');
 
       try {
-        const response = await fetchRecentPlaces(undefined, 12);
+        const response = await fetchRecentPlaces(undefined, 500);
         if (!isActive) return;
 
         const items = Array.isArray(response?.data) ? response.data : [];
@@ -655,7 +655,7 @@ ensureMapsScript(() => {
                 <div style={{ marginTop: '40px',marginLeft: '65px', fontFamily: 'Inter, sans-serif', fontSize: '16px', fontWeight: 500, color: '#1F2937' }}>
                   Your Recent Places
                 </div>
-                <div style={{ marginTop: '20px', marginLeft: '40px', marginRight: '40px', maxHeight: '520px', overflowY: 'auto', paddingRight: '8px' }}>
+                <div style={{ marginTop: '20px', marginLeft: '40px', marginRight: '40px', maxHeight: '390px', overflowY: 'auto', paddingRight: '8px' }}>
                   {recentPlacesLoading && (
                     <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', color: '#374151' }}>
                       Loading recent places...
@@ -675,10 +675,11 @@ ensureMapsScript(() => {
                   )}
 
                   {!recentPlacesLoading && !recentPlacesError && recentPlaces.length > 0 && (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '26px 44px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gridAutoRows: 'minmax(102px, auto)', gap: '26px 44px' }}>
                       {recentPlaces.map((place) => {
                         const placeName = place?.name || 'Unknown place';
                         const actionLabel = place?.action || 'Viewed';
+                        const viewedLabel = place?.action === 'Got Direction' ? 'Got Direction' : formatViewedAgo(place?.timestamp);
 
                         return (
                           <div key={place._id} style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -688,7 +689,7 @@ ensureMapsScript(() => {
 
                             <div style={{ fontFamily: 'Inter, sans-serif', color: '#111827', lineHeight: 1.2 }}>
                               <div style={{ fontSize: '16px', fontWeight: 500 }}>{placeName}</div>
-                              <div style={{ fontSize: '13px', marginTop: '4px' }}>{place.action === 'Got Direction' ? 'Got Direction' : 'Viewed'}</div>
+                              <div style={{ fontSize: '13px', marginTop: '4px' }}>{viewedLabel}</div>
                             </div>
                           </div>
                         );
