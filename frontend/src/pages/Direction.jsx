@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import middle from '../assets/middle.png';
 import bikeIcon from '../assets/bikeIcon.png';
 import manIcon from '../assets/manIcon.png';
@@ -24,6 +25,13 @@ const MODE_CONFIGS = [
   { key: 'transit', label: 'Transit', icon: busIcon, travelMode: 'TRANSIT', multiplier: 1.85 },
   { key: 'walk', label: 'Walk', icon: manIcon, travelMode: 'WALKING', multiplier: 8.5 },
 ];
+
+const SRI_LANKA_BOUNDS = {
+  north: 10.0,
+  south: 5.7,
+  east: 82.1,
+  west: 79.4,
+};
 
 const parseDurationToMinutes = (durationText = '') => {
   const normalized = durationText.toLowerCase();
@@ -140,7 +148,16 @@ const describeRoute = (route, idx, allRoutes) => {
 };
 
 const Direction = ({ showDetailsPanel = true }) => {
-  const { searchedPlace, userLocation, setActivePage, pendingOriginLabel, pendingVehicle, setPendingOriginLabel, setPendingVehicle, setTitle, setEtaData } = usePageTitle();
+  const { searchedPlace, userLocation, setActivePage, pendingOriginLabel, pendingVehicle, setPendingOriginLabel, setPendingVehicle, setTitle, setEtaData, setSearchedPlace, setSafetyData, setHasSearched, setShowSearchBar } = usePageTitle();
+
+  useEffect(() => {
+    setTitle('');
+  }, [setTitle]);
+
+  useEffect(() => {
+    setShowSearchBar(!showDetailsPanel);
+    return () => setShowSearchBar(false);
+  }, [setShowSearchBar, showDetailsPanel]);
 
   // Expose navigation and ETA setter globally for overlay click handler
   window.setActivePageGlobal = setActivePage;
@@ -187,6 +204,10 @@ const Direction = ({ showDetailsPanel = true }) => {
     'Supermarket':     { type: 'supermarket',   keyword: 'supermarket' },
   };
 
+  const POI_ATTRACTION_KEYWORDS = [
+    { type: 'tourist_attraction', keyword: 'tourist attraction',   radius: 2000 },
+  ];
+
   const getDistanceToPath = (point, path) => {
     const R = 6371000;
     const toRad2 = (v) => (v * Math.PI) / 180;
@@ -205,6 +226,45 @@ const Direction = ({ showDetailsPanel = true }) => {
     return minDist;
   };
 
+  const getNavigationMarkerIcon = () => ({
+    url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(`
+      <svg xmlns='http://www.w3.org/2000/svg' width='34' height='34' viewBox='0 0 34 34'>
+        <path d='M17 2 L28 32 L17 25 L6 32 Z' fill='#1A73E8' stroke='#ffffff' stroke-width='2' stroke-linejoin='round'/>
+      </svg>
+    `),
+    scaledSize: new window.google.maps.Size(34, 34),
+    anchor: new window.google.maps.Point(17, 17),
+  });
+
+  const addPoiMarker = (place) => {
+    if (!mapInstanceRef.current || !place?.location) return;
+
+    const existingMarker = poiMarkersRef.current.find((marker) => marker.__placeId === place.placeId);
+    if (existingMarker) {
+      mapInstanceRef.current.panTo(existingMarker.getPosition());
+      mapInstanceRef.current.setZoom(16);
+      return;
+    }
+
+    const marker = new window.google.maps.Marker({
+      position: place.location,
+      map: mapInstanceRef.current,
+      title: place.name,
+      icon: { url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png' },
+    });
+
+    marker.__placeId = place.placeId;
+
+    const infoWindow = new window.google.maps.InfoWindow({
+      content: `<div style="font-family:Inter,sans-serif;font-size:13px;max-width:160px"><strong>${place.name}</strong>${place.rating ? `<br/>⭐ ${place.rating.toFixed(1)}` : ''}<br/><span style="color:#6B7280;font-size:11px">${place.vicinity}</span></div>`,
+    });
+
+    marker.addListener('click', () => infoWindow.open(mapInstanceRef.current, marker));
+    poiMarkersRef.current.push(marker);
+    mapInstanceRef.current.panTo(place.location);
+    mapInstanceRef.current.setZoom(16);
+  };
+
   const searchPlacesAlongRoute = useCallback((category) => {
     const result = directionsResultRef.current;
     if (!result || !mapInstanceRef.current) return;
@@ -220,15 +280,12 @@ const Direction = ({ showDetailsPanel = true }) => {
 
     setPoiLoading(true);
     setPoiResults([]);
-    clearPoiMarkers();
 
-    // Scale sample count and radius based on route length
     const totalPoints = path.length;
     const sampleCount = Math.min(20, Math.max(8, Math.floor(totalPoints / 10)));
     const step = Math.max(1, Math.floor(totalPoints / sampleCount));
     const samplePoints = [];
     for (let i = 0; i < totalPoints; i += step) samplePoints.push(path[i]);
-    // Always include last point
     if (samplePoints[samplePoints.length - 1] !== path[totalPoints - 1]) {
       samplePoints.push(path[totalPoints - 1]);
     }
@@ -252,7 +309,7 @@ const Direction = ({ showDetailsPanel = true }) => {
                   name: place.name,
                   rating: place.rating || null,
                   vicinity: place.vicinity || '',
-                  photo: place.photos?.[0]?.getUrl({ maxWidth: 300 }) || null,
+                  photo: place.photos?.[0]?.getUrl({ maxWidth: 400, maxHeight: 400 }) || null,
                   placeId: place.place_id,
                   location: place.geometry.location,
                 });
@@ -264,22 +321,69 @@ const Direction = ({ showDetailsPanel = true }) => {
             const sorted = collected.sort((a, b) => (b.rating || 0) - (a.rating || 0));
             setPoiResults(sorted);
             setPoiLoading(false);
-            sorted.forEach((place) => {
-              const marker = new window.google.maps.Marker({
-                position: place.location,
-                map: mapInstanceRef.current,
-                title: place.name,
-                icon: { url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png' },
-              });
-              const infoWindow = new window.google.maps.InfoWindow({
-                content: `<div style="font-family:Inter,sans-serif;font-size:13px;max-width:160px"><strong>${place.name}</strong>${place.rating ? `<br/>⭐ ${place.rating.toFixed(1)}` : ''}<br/><span style="color:#6B7280;font-size:11px">${place.vicinity}</span></div>`,
-              });
-              marker.addListener('click', () => infoWindow.open(mapInstanceRef.current, marker));
-              poiMarkersRef.current.push(marker);
-            });
           }
         }
       );
+    });
+  }, [selectedIdx]);
+
+  const searchAttractionsAlongRoute = useCallback(() => {
+    const result = directionsResultRef.current;
+    if (!result || !mapInstanceRef.current) return;
+
+    const path = result.routes[selectedIdx]?.overview_path || [];
+    if (!path.length) return;
+
+    const totalPoints = path.length;
+    const sampleCount = Math.min(15, Math.max(6, Math.floor(totalPoints / 12)));
+    const step = Math.max(1, Math.floor(totalPoints / sampleCount));
+    const samplePoints = [];
+    for (let i = 0; i < totalPoints; i += step) samplePoints.push(path[i]);
+    if (samplePoints[samplePoints.length - 1] !== path[totalPoints - 1]) {
+      samplePoints.push(path[totalPoints - 1]);
+    }
+
+    setPoiLoading(true);
+    setPoiResults([]);
+
+    const service = new window.google.maps.places.PlacesService(mapInstanceRef.current);
+    const seen = new Set();
+    const collected = [];
+    let pending = samplePoints.length * POI_ATTRACTION_KEYWORDS.length;
+
+    samplePoints.forEach((point) => {
+      POI_ATTRACTION_KEYWORDS.forEach(({ type, keyword, radius }) => {
+        service.nearbySearch(
+          { location: point, radius, type, keyword },
+          (results, status) => {
+            if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
+              results.forEach((place) => {
+                if (seen.has(place.place_id)) return;
+                const minRating = 4.5;
+                if ((place.rating || 0) < minRating) return;
+                const dist = getDistanceToPath(place.geometry.location, path);
+                if (dist <= radius) {
+                  seen.add(place.place_id);
+                  collected.push({
+                    name: place.name,
+                    rating: place.rating || null,
+                    vicinity: place.vicinity || '',
+                    photo: place.photos?.[0]?.getUrl({ maxWidth: 400, maxHeight: 400 }) || null,
+                    placeId: place.place_id,
+                    location: place.geometry.location,
+                  });
+                }
+              });
+            }
+            pending -= 1;
+            if (pending === 0) {
+              const sorted = collected.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+              setPoiResults(sorted);
+              setPoiLoading(false);
+            }
+          }
+        );
+      });
     });
   }, [selectedIdx]);
   const stopAutocompleteRef = useRef(null);
@@ -379,6 +483,40 @@ const Direction = ({ showDetailsPanel = true }) => {
     return R * c;
   };
 
+  const formatManeuver = (step) => {
+    if (!step) return '';
+
+    const maneuver = (step.maneuver || '').replace(/_/g, ' ').trim();
+    if (maneuver) {
+      return maneuver.charAt(0).toUpperCase() + maneuver.slice(1);
+    }
+
+    const raw = sanitizeInstruction(step.instructions || step.html_instructions || '');
+    if (!raw) return '';
+
+    const lower = raw.toLowerCase();
+    if (lower.startsWith('head ') || lower.startsWith('continue') || lower.startsWith('keep ')) {
+      return '';
+    }
+
+    return raw;
+  };
+
+  const getActiveManeuverStep = () => {
+    const steps = directionsResultRef.current?.routes?.[selectedIdx]?.legs?.[0]?.steps || [];
+    if (!steps.length) return null;
+
+    const idx = Math.min(navStepIndex, steps.length - 1);
+    const currentStep = steps[idx];
+    const currentLabel = formatManeuver(currentStep);
+    if (currentLabel) return { step: currentStep, label: currentLabel };
+
+    const lookAhead = steps.slice(idx + 1).find((step) => formatManeuver(step));
+    if (lookAhead) return { step: lookAhead, label: formatManeuver(lookAhead) };
+
+    return { step: currentStep, label: sanitizeInstruction(currentStep.instructions || currentStep.html_instructions || 'Continue') };
+  };
+
   const updateNavigation = useCallback((loc, forcedIndex = null) => {
     const result = directionsResultRef.current;
     const leg = result?.routes?.[selectedIdx]?.legs?.[0];
@@ -464,6 +602,7 @@ const Direction = ({ showDetailsPanel = true }) => {
         });
         renderersRef.current.push(renderer);
       } else {
+        if (!showDetailsPanel) return; // Do not draw alternative routes on start page
         const polyline = new window.google.maps.Polyline({
           path: route.overview_path,
           map: mapInstanceRef.current,
@@ -659,8 +798,48 @@ const Direction = ({ showDetailsPanel = true }) => {
           });
 
           setRoutes(routeInfoList);
-          setSelectedIdx(0);
-          drawSelectedRoute(0);
+
+          let shortestIdx = 0;
+          let minDistance = Infinity;
+          result.routes.forEach((route, i) => {
+            const dist = route.legs?.[0]?.distance?.value || Infinity;
+            if (dist < minDistance) {
+              minDistance = dist;
+              shortestIdx = i;
+            }
+          });
+
+          setSelectedIdx(shortestIdx);
+          drawSelectedRoute(shortestIdx);
+
+          // On the start page, fit the map to the full route so ETA labels are visible
+          if (!showDetailsPanel) {
+            const selectedLeg = result.routes[shortestIdx]?.legs?.[0];
+            if (selectedLeg) {
+              const bounds = new window.google.maps.LatLngBounds();
+              bounds.extend(selectedLeg.start_location);
+              bounds.extend(selectedLeg.end_location);
+              // Also include the midpoint where the ETA label sits
+              const overviewPath = result.routes[shortestIdx]?.overview_path || [];
+              if (overviewPath.length > 0) {
+                const mid = overviewPath[Math.floor(overviewPath.length / 2)];
+                bounds.extend(mid);
+              }
+              mapInstanceRef.current.fitBounds(bounds, { top: 60, bottom: 60, left: 30, right: 30 });
+            }
+          }
+
+          // Push ETA data into context so Header can show it on the start page
+          if (!showDetailsPanel && routeInfoList[shortestIdx]) {
+            const info = routeInfoList[shortestIdx];
+            setEtaData({
+              distance: info.distance,
+              duration: info.duration,
+              durationMinutes: info.durationMinutes,
+              traffic: info.traffic,
+              mode: selectedMode,
+            });
+          }
 
           // Real-time flood check on the selected route
           if (!showDetailsPanel) {
@@ -737,18 +916,14 @@ const Direction = ({ showDetailsPanel = true }) => {
   const placeOriginMarker = (loc) => {
     if (originMarkerRef.current) {
       originMarkerRef.current.setPosition(loc);
+      originMarkerRef.current.setIcon(getNavigationMarkerIcon());
+      originMarkerRef.current.setMap(mapInstanceRef.current);
     } else {
       originMarkerRef.current = new window.google.maps.Marker({
         position: loc,
         map: mapInstanceRef.current,
-        icon: {
-          path: window.google.maps.SymbolPath.CIRCLE,
-          scale: 10,
-          fillColor: '#104bc0',
-          fillOpacity: 1,
-          strokeColor: '#fff',
-          strokeWeight: 2,
-        },
+        icon: getNavigationMarkerIcon(),
+        zIndex: 999,
       });
     }
   };
@@ -756,13 +931,17 @@ const Direction = ({ showDetailsPanel = true }) => {
   const applyOrigin = useCallback((loc, label, fireRoute = true) => {
     userLocationRef.current = loc;
     setOriginLabel(label);
-    placeOriginMarker(loc);
+    if (!showDetailsPanel) {
+      placeOriginMarker(loc);
+    } else if (originMarkerRef.current) {
+      originMarkerRef.current.setMap(null);
+    }
     if (fireRoute) {
       originChosenRef.current = true;
       const dest = destPlace || searchedPlace;
       requestDirections(loc, dest?.geometry?.location || destination, selectedMode);
     }
-  }, [selectedMode, destPlace, searchedPlace, destination]);
+  }, [showDetailsPanel, selectedMode, destPlace, searchedPlace, destination]);
 
   const onOriginSelect = useCallback((place) => {
     const loc = { lat: place.geometry.location.lat(), lng: place.geometry.location.lng() };
@@ -771,6 +950,7 @@ const Direction = ({ showDetailsPanel = true }) => {
 
   const onDestSelect = useCallback((place) => {
     setDestPlace(place);
+    setSearchedPlace(place);
     if (userLocationRef.current) {
       const loc = place.geometry.location;
       if (destMarkerRef.current) {
@@ -818,6 +998,10 @@ const Direction = ({ showDetailsPanel = true }) => {
       mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
         center: initialCenter,
         zoom: destLoc ? 12 : 7,
+        restriction: {
+          latLngBounds: SRI_LANKA_BOUNDS,
+          strictBounds: true,
+        },
         mapTypeControl: false,
         streetViewControl: false,
         fullscreenControl: false,
@@ -882,7 +1066,11 @@ const Direction = ({ showDetailsPanel = true }) => {
         const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         userLocationRef.current = loc;
         placeOriginMarker(loc);
-        mapInstanceRef.current?.panTo(loc);
+        // Only pan to user location if no routes are drawn yet;
+        // otherwise keep the full route (with ETA labels) visible
+        if (!directionsResultRef.current) {
+          mapInstanceRef.current?.panTo(loc);
+        }
         updateNavigation(loc);
         if (!directionsResultRef.current) {
           const dest = destPlace || searchedPlace;
@@ -981,10 +1169,107 @@ const Direction = ({ showDetailsPanel = true }) => {
   };
 
   const handleStart = () => {
+    if (directionsResultRef.current?.routes?.length > 1) {
+      let minDistance = Infinity;
+      let shortestIdx = 0;
+      directionsResultRef.current.routes.forEach((route, i) => {
+        const dist = route.legs?.[0]?.distance?.value || Infinity;
+        if (dist < minDistance) {
+          minDistance = dist;
+          shortestIdx = i;
+        }
+      });
+      if (shortestIdx !== selectedIdx) {
+        selectRouteRef.current(shortestIdx);
+      }
+    }
+
+    setShowSearchBar(true);
     if (setActivePage) {
       setActivePage('start');
       setActionMessage('Opening start page.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
+  };
+
+  const focusJourneyStart = useCallback(() => {
+    if (!mapInstanceRef.current) return;
+
+    // If we have a route, fit the map to the full route bounds
+    // so that ETA labels (placed at the midpoint) remain visible
+    const result = directionsResultRef.current;
+    if (result?.routes?.length > 0) {
+      const route = result.routes[selectedIdx] || result.routes[0];
+      const leg = route?.legs?.[0];
+      if (leg) {
+        const bounds = new window.google.maps.LatLngBounds();
+        bounds.extend(leg.start_location);
+        bounds.extend(leg.end_location);
+        const overviewPath = route.overview_path || [];
+        if (overviewPath.length > 0) {
+          const mid = overviewPath[Math.floor(overviewPath.length / 2)];
+          bounds.extend(mid);
+        }
+        mapInstanceRef.current.fitBounds(bounds, { top: 60, bottom: 60, left: 30, right: 30 });
+        return;
+      }
+    }
+
+    // Fallback: no route yet, pan to start location
+    const startLocation = originMarkerRef.current?.getPosition()
+      || userLocationRef.current
+      || activeRoutePairRef.current.origin;
+
+    if (!startLocation) return;
+
+    mapInstanceRef.current.panTo(startLocation);
+    mapInstanceRef.current.setZoom(16);
+  }, [selectedIdx]);
+
+  useEffect(() => {
+    if (!showDetailsPanel) {
+      if (userLocationRef.current) {
+        placeOriginMarker(userLocationRef.current);
+      }
+      // Re-draw the selected route so ETA labels (guarded by !showDetailsPanel)
+      // are created now that we're on the start page
+      if (directionsResultRef.current && mapInstanceRef.current) {
+        drawSelectedRoute(selectedIdx);
+        // Fit map to the full route so ETA label at midpoint is visible
+        const route = directionsResultRef.current.routes[selectedIdx] || directionsResultRef.current.routes[0];
+        const leg = route?.legs?.[0];
+        if (leg) {
+          const bounds = new window.google.maps.LatLngBounds();
+          bounds.extend(leg.start_location);
+          bounds.extend(leg.end_location);
+          const overviewPath = route.overview_path || [];
+          if (overviewPath.length > 0) {
+            bounds.extend(overviewPath[Math.floor(overviewPath.length / 2)]);
+          }
+          mapInstanceRef.current.fitBounds(bounds, { top: 60, bottom: 60, left: 30, right: 30 });
+        }
+      } else {
+        focusJourneyStart();
+      }
+    } else if (originMarkerRef.current) {
+      originMarkerRef.current.setMap(null);
+    }
+  }, [showDetailsPanel]);
+
+  const handleSafetyAlert = () => {
+    const routePath = directionsResultRef.current?.routes?.[selectedIdx]?.overview_path || [];
+    if (typeof setSafetyData === 'function') {
+      setSafetyData({
+        origin: originLabel || userLocationRef.current || null,
+        destination,
+        mode: selectedMode,
+        routePath: routePath.map((point) => ({
+          lat: typeof point.lat === 'function' ? point.lat() : point.lat,
+          lng: typeof point.lng === 'function' ? point.lng() : point.lng,
+        })),
+      });
+    }
+    setActivePage && setActivePage('safety');
   };
 
   const handleAddStop = () => {
@@ -997,6 +1282,8 @@ const Direction = ({ showDetailsPanel = true }) => {
     ensureMapsScript(() => {
       stopAutocompleteRef.current = new window.google.maps.places.AutocompleteService();
       stopGeocoderRef.current = new window.google.maps.Geocoder();
+      // Auto-load high-rated attractions along the route
+      searchAttractionsAlongRoute();
     });
   };
 
@@ -1067,6 +1354,9 @@ const Direction = ({ showDetailsPanel = true }) => {
     ? (selectedRouteMinutes || drivingMinutesRef.current || 215)
     : (drivingMinutesRef.current || selectedRouteMinutes || 215);
 
+  const activeManeuver = getActiveManeuverStep();
+  const currentTurnInstruction = activeManeuver?.label || '';
+
   const isStartPage = !showDetailsPanel;
   const bannerTitle = isStartPage
     ? (navInstruction ? `${navInstruction}${navDistance ? ` in ${navDistance}` : ''}` : 'Calculating route...')
@@ -1074,9 +1364,9 @@ const Direction = ({ showDetailsPanel = true }) => {
   const mapHeight = showDetailsPanel ? (addStopOpen && !stopPanelCollapsed ? '450px' : '900px') : 'calc(100vh + 80px)';
 
   return (
-    <div className="relative w-full bg-[#edf7ff]" style={{ minHeight: showDetailsPanel ? '50%' : mapHeight }}>
+    <div className="relative w-full overflow-hidden bg-[#edf7ff]" style={{ minHeight: '100vh' }}>
       <div className="absolute inset-0 z-0 opacity-40 pointer-events-none">
-        <img src={middle} alt="Ocean background" className="w-full h-full object-cover scale-x-[1.7]" />
+        <img src={middle} alt="Ocean background" className="h-full w-full object-cover scale-x-[1.7]" />
       </div>
 
       <div className="relative z-10 w-full">
@@ -1126,6 +1416,11 @@ const Direction = ({ showDetailsPanel = true }) => {
                   {isStartPage && destination && !navArrived && (
                     <span className="text-sm text-slate-500">To {destination}</span>
                   )}
+                  {isStartPage && currentTurnInstruction && !navArrived && (
+                    <span className="text-sm font-medium text-slate-600">
+                      {currentTurnInstruction}{navDistance ? ` in ${navDistance}` : ''}
+                    </span>
+                  )}
                   {!isStartPage && navDistance && !navArrived && (
                     <span className="text-sm text-slate-500">in {navDistance}</span>
                   )}
@@ -1137,20 +1432,26 @@ const Direction = ({ showDetailsPanel = true }) => {
 
 
         {!showDetailsPanel && (
-          <div className="flex items-center justify-center" style={{ marginTop: '150px', marginBottom: '150px', gap: '200px' }}>
+          <div className="flex items-center justify-center" style={{ marginTop: '150px', marginBottom: '150px', gap: '260px' }}>
             <button
               type="button"
-              onClick={() => setActivePage && setActivePage('direction')}
-              className="rounded-xl bg-[#e53e3e] px-10 py-3 text-base font-semibold text-white hover:bg-[#c53030]"
+              onClick={() => {
+                setHasSearched(true);
+                setActivePage && setActivePage('explore');
+              }}
+              className="rounded-xl bg-[#e53e3e] px-12 py-4 text-lg font-semibold text-white hover:bg-[#c53030]"
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={() => setActivePage && setActivePage('safety')}
-              className="rounded-xl bg-[#1A73E8] px-10 py-3 text-base font-semibold text-white hover:bg-[#165fbe]"
+              className="flex items-center gap-4 rounded-[14px] bg-[#FFD84D] px-8 py-5 text-lg font-extrabold text-white shadow-[0_8px_18px_rgba(0,0,0,0.18)] transition-transform duration-150 hover:scale-[1.01] hover:bg-[#ffcf2e]"
             >
-              Safety Alert
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#E31B23] text-[18px] leading-none text-white shadow-[0_2px_4px_rgba(0,0,0,0.2)]">
+                !
+              </span>
+              <span>Safety Alert</span>
             </button>
           </div>
         )}
@@ -1297,24 +1598,17 @@ const Direction = ({ showDetailsPanel = true }) => {
                 Searching along route...
               </p>
             )}
-            {!poiLoading && activeCategory && poiResults.length === 0 && (
+            {!poiLoading && poiResults.length === 0 && (
               <p style={{ fontFamily: 'Inter, sans-serif', fontSize: '13px', color: '#6B7280', marginLeft: '2%' }}>
-                No {activeCategory.toLowerCase()} found along this route.
+                {activeCategory ? `No ${activeCategory.toLowerCase()} found along this route.` : 'No attractions found within 2 km of your route.'}
               </p>
             )}
             {!poiLoading && poiResults.length > 0 && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '16px', paddingBottom: '8px', marginLeft: '2%', maxHeight: '520px', overflowY: 'auto' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '16px', paddingBottom: '8px', marginLeft: '2%', maxHeight: '520px', overflowY: 'auto' }}>
                 {poiResults.map((place) => (
                   <div key={place.placeId}
                     onClick={() => {
-                      poiMarkersRef.current.forEach((m) => {
-                        const isSelected = m.getTitle() === place.name;
-                        m.setMap(isSelected ? mapInstanceRef.current : null);
-                        if (isSelected && mapInstanceRef.current) {
-                          mapInstanceRef.current.panTo(m.getPosition());
-                          mapInstanceRef.current.setZoom(16);
-                        }
-                      });
+                      addPoiMarker(place);
                       setStopPanelCollapsed(true);
                     }}
                     style={{
@@ -1322,12 +1616,17 @@ const Direction = ({ showDetailsPanel = true }) => {
                       boxShadow: '0 2px 8px rgba(0,0,0,0.10)',
                       overflow: 'hidden', cursor: 'pointer',
                     }}>
-                    {place.photo
-                      ? <img src={place.photo} alt={place.name} style={{ width: '100%', height: '120px', objectFit: 'cover' }} />
-                      : <div style={{ width: '100%', height: '120px', background: '#e0eeff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#1A73E8" strokeWidth="1.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                        </div>
-                    }
+                    <div style={{ width: '100%', height: '160px', overflow: 'hidden', flexShrink: 0 }}>
+                      {place.photo
+                        ? <img src={place.photo} alt={place.name}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                            onError={(e) => { e.target.style.display = 'none'; e.target.parentNode.style.background = '#e0eeff'; e.target.parentNode.innerHTML = '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#1A73E8" stroke-width="1.5" style="margin:auto;display:block;margin-top:64px"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>'; }}
+                          />
+                        : <div style={{ width: '100%', height: '100%', background: '#e0eeff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#1A73E8" strokeWidth="1.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                          </div>
+                      }
+                    </div>
                     <div style={{ padding: '8px 10px' }}>
                       <p style={{ fontFamily: 'Inter, sans-serif', fontWeight: 600, fontSize: '13px', color: '#111', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{place.name}</p>
                       {place.rating && <p style={{ fontFamily: 'Inter, sans-serif', fontSize: '12px', color: '#F5A623', margin: '4px 0 0' }}>{'★'.repeat(Math.round(place.rating))} {place.rating.toFixed(1)}</p>}
@@ -1340,7 +1639,7 @@ const Direction = ({ showDetailsPanel = true }) => {
 
             </div>
             <button
-              onClick={() => { setAddStopOpen(false); clearPoiMarkers(); setPoiResults([]); setActiveCategory(null); }}
+              onClick={() => { setAddStopOpen(false); setPoiResults([]); setActiveCategory(null); }}
               style={{ position: 'absolute', top: '16px', right: '16px', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
             >
               <img src={closeIcon} alt="Close" style={{ width: '28px', height: '28px' }} />
@@ -1394,7 +1693,7 @@ const Direction = ({ showDetailsPanel = true }) => {
                 </div>
 
                 {/* Vehicle selector row */}
-                <div className="mt-12  flex flex-wrap items-center gap-56">
+                <div className="mt-12 flex items-center justify-between gap-4 w-full overflow-x-auto">
                   {MODE_CONFIGS.map((mode) => {
                     const active = mode.key === selectedMode;
                     const timeLabel = active
@@ -1411,14 +1710,14 @@ const Direction = ({ showDetailsPanel = true }) => {
                           setFallbackMode(false);
                           setSelectedMode(mode.key);
                         }}
-                        className="flex flex-col items-center gap-1 bg-transparent border-none outline-none cursor-pointer"
+                        className="flex flex-col items-center gap-1 bg-transparent border-none outline-none cursor-pointer flex-1"
                       >
                         <div className="flex items-center gap-3">
                           <img src={mode.icon} alt={mode.label} className="h-6 w-5 object-contain" />
                           <span className="text-medium font-medium text-slate-700 whitespace-nowrap">{timeLabel}</span>
                         </div>
                         {/* thin blue underline on active */}
-                        <div style={{ height: '3.4px', width: '200px',marginTop: '36px',borderRadius: '2px', background: active ? '#1A73E8' : 'transparent' }} />
+                        <div style={{ height: '3.4px', width: '100%', marginTop: '36px', borderRadius: '2px', background: active ? '#1A73E8' : 'transparent' }} />
                       </button>
                     );
                   })}
@@ -1467,11 +1766,11 @@ const Direction = ({ showDetailsPanel = true }) => {
                     })()}
 
                     {/* Line 4: four action buttons */}
-                    <div className="mt-12 flex flex-wrap items-center gap-72 ">
-                      <button type="button" onClick={handleStart} className="rounded-xl bg-[#1A73E8] px-12 py-4 text-medium font-semibold text-white hover:bg-[#165fbe]">Start</button>
-                      <button type="button" onClick={handleAddStop} className="rounded-xl bg-[#1A73E8] px-12 py-4 text-medium font-semibold text-white hover:bg-[#165fbe]">Add Stop</button>
-                      <button type="button" onClick={handleShare} className="rounded-xl bg-[#1A73E8] px-12 py-4 text-medium font-semibold text-white hover:bg-[#165fbe]">Share</button>
-                      <button type="button" onClick={handleSave} className="rounded-xl bg-[#1A73E8] px-12 py-4 text-medium font-semibold text-white hover:bg-[#165fbe]">Save</button>
+                    <div className="mt-12 flex items-center justify-between gap-4 w-full overflow-x-auto">
+                      <button type="button" onClick={handleStart} className="flex-1 rounded-xl bg-[#1A73E8] py-4 px-2 text-medium font-semibold text-white hover:bg-[#165fbe] whitespace-nowrap">Start</button>
+                      <button type="button" onClick={handleAddStop} className="flex-1 rounded-xl bg-[#1A73E8] py-4 px-2 text-medium font-semibold text-white hover:bg-[#165fbe] whitespace-nowrap">Add Stop</button>
+                      <button type="button" onClick={handleShare} className="flex-1 rounded-xl bg-[#1A73E8] py-4 px-2 text-medium font-semibold text-white hover:bg-[#165fbe] whitespace-nowrap">Share</button>
+                      <button type="button" onClick={handleSave} className="flex-1 rounded-xl bg-[#1A73E8] py-4 px-2 text-medium font-semibold text-white hover:bg-[#165fbe] whitespace-nowrap">Save</button>
                     </div>
                   </div>
                 )}
@@ -1495,55 +1794,61 @@ const Direction = ({ showDetailsPanel = true }) => {
 
       {/* Location panel - inside map area, top right */}
       {!isStartPage && !addStopOpen && (
-        <div
-          className="p-6 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg"
-          style={{ position: 'absolute', top:'-70px', right: '64px', width: '880px', minHeight: '150px', zIndex: 50 }}
-        >
-          <div className="flex items-center gap-3 pb-4">
-            <img src={swapped ? redPinIcon : blueLocationIcon} alt="Origin" className="w-5 h-5 shrink-0" />
-            <LocationInput
-              placeholder="Your location"
-              initialValue={pendingOriginLabel || ''}
-              onSelect={onOriginSelect}
-              showGps
-              gpsDisplayValue="Your Location"
-              onGpsSelect={() => {
-                if (!navigator.geolocation) return;
-                if (navWatchIdRef.current != null) {
-                  navigator.geolocation.clearWatch(navWatchIdRef.current);
-                  navWatchIdRef.current = null;
-                }
-                navigator.geolocation.getCurrentPosition(
-                  (pos) => {
-                    const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                    userLocationRef.current = loc;
-                    applyOrigin(loc, 'Your location', true);
-                  },
-                  () => {},
-                  { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
-                );
-              }}
-            />
-          </div>
-          <div className="flex items-center gap-3 py-2">
-            <img src={threeDots} alt="Separator" className="w-7 h-7" />
-            <hr style={{ width: '90%', border: 'none', borderTop: '3px solid #000' }} />
-          </div>
-          <div className="flex items-center gap-3 pt-4">
-            <img src={swapped ? blueLocationIcon : redPinIcon} alt="Destination" className="w-5 h-5 shrink-0" />
-            <LocationInput
-              placeholder="Choose destination"
-              initialValue={destination}
-              onSelect={onDestSelect}
-            />
-          </div>
-          <div className="absolute right-4 top-1/3 z-10" onClick={handleSwap} style={{ cursor: 'pointer' }}>
-            <img src={upDown} alt="Swap" className="w-6 h-12 object-contain opacity-90" />
-          </div>
-          <div className="absolute top-3 right-4">
-            <img src={threeDots} alt="Menu" className="w-7 h-7" />
-          </div>
-        </div>
+        (() => {
+          const content = (
+            <div
+              className="p-6 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg"
+              style={document.getElementById('header-search-portal') ? { width: '100%', minHeight: '150px', zIndex: 50, position: 'absolute', top: '-15px', right: 0 } : { position: 'absolute', top:'-70px', right: '64px', width: '880px', minHeight: '150px', zIndex: 50 }}
+            >
+              <div className="flex items-center gap-3 pb-4">
+                <img src={swapped ? redPinIcon : blueLocationIcon} alt="Origin" className="w-5 h-5 shrink-0" />
+                <LocationInput
+                  placeholder="Your location"
+                  initialValue={pendingOriginLabel || ''}
+                  onSelect={onOriginSelect}
+                  showGps
+                  gpsDisplayValue="Your Location"
+                  onGpsSelect={() => {
+                    if (!navigator.geolocation) return;
+                    if (navWatchIdRef.current != null) {
+                      navigator.geolocation.clearWatch(navWatchIdRef.current);
+                      navWatchIdRef.current = null;
+                    }
+                    navigator.geolocation.getCurrentPosition(
+                      (pos) => {
+                        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                        userLocationRef.current = loc;
+                        applyOrigin(loc, 'Your location', true);
+                      },
+                      () => {},
+                      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+                    );
+                  }}
+                />
+              </div>
+              <div className="flex items-center gap-3 py-2">
+                <img src={threeDots} alt="Separator" className="w-7 h-7" />
+                <hr style={{ width: '90%', border: 'none', borderTop: '3px solid #000' }} />
+              </div>
+              <div className="flex items-center gap-3 pt-4">
+                <img src={swapped ? blueLocationIcon : redPinIcon} alt="Destination" className="w-5 h-5 shrink-0" />
+                <LocationInput
+                  placeholder="Choose destination"
+                  initialValue={destination}
+                  onSelect={onDestSelect}
+                />
+              </div>
+              <div className="absolute right-4 top-1/3 z-10" onClick={handleSwap} style={{ cursor: 'pointer' }}>
+                <img src={upDown} alt="Swap" className="w-6 h-12 object-contain opacity-90" />
+              </div>
+              <div className="absolute top-3 right-4">
+                <img src={threeDots} alt="Menu" className="w-7 h-7" />
+              </div>
+            </div>
+          );
+          const portalContainer = document.getElementById('header-search-portal');
+          return portalContainer ? createPortal(content, portalContainer) : content;
+        })()
       )}
     </div>
   );

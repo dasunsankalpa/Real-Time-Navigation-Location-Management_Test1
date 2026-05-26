@@ -59,7 +59,7 @@ const getTrafficLabel = (traffic) => {
 };
 
 const EtaPage = () => {
-  const { etaData, searchedPlace, userLocation } = usePageTitle();
+  const { etaData, searchedPlace, userLocation, setActivePage } = usePageTitle();
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const [mapReady, setMapReady] = useState(false);
@@ -300,6 +300,61 @@ const EtaPage = () => {
             <div style={{ fontSize: '16px', fontWeight: 700, color: '#111827', fontFamily: "'Inter', sans-serif", marginTop: '2px' }}>{MODE_LABELS[mode] || 'Car'}</div>
             <img src={MODE_ICONS[mode] || carIcon} alt="transport" style={{ width: '28px', height: '28px', objectFit: 'contain', margin: '4px auto 0' }} />
           </div>
+        </div>
+
+        {/* ── Action Buttons ── */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: '120px', // Creates space between the centered buttons
+          width: '100%',
+          marginTop: '10px',
+          marginBottom: '40px',
+          padding: '0 20px',
+        }}>
+          <button
+            type="button"
+            onClick={() => setActivePage && setActivePage('direction')}
+            style={{
+              background: '#2B5BA9',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '12px 32px',
+              fontSize: '16px',
+              fontWeight: 600,
+              fontFamily: "'Inter', sans-serif",
+              cursor: 'pointer',
+              boxShadow: '0 4px 6px rgba(0,0,0,0.2)',
+              minWidth: '140px',
+            }}
+          >
+            Back
+          </button>
+          <button
+            type="button"
+            onClick={() => setActivePage && setActivePage('start')}
+            style={{
+              background: '#2B5BA9',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '12px 32px',
+              fontSize: '16px',
+              fontWeight: 600,
+              fontFamily: "'Inter', sans-serif",
+              cursor: 'pointer',
+              boxShadow: '0 4px 6px rgba(0,0,0,0.2)',
+              minWidth: '140px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+            }}
+          >
+            <span>Start</span>
+            <span>Navigation</span>
+          </button>
         </div>
 
       </div>

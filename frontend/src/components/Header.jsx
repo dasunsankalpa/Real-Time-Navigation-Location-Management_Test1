@@ -8,7 +8,7 @@ import { ensureMapsScript } from '../utils/helpers';
 const SRI_LANKA_BOUNDS = { north: 10.0, south: 5.7, east: 82.1, west: 79.4 };
 
 export default function Header() {
-  const { title, showSearchBar, navigateToSearch, activePage, searchedPlace } = usePageTitle();
+  const { title, showSearchBar, navigateToSearch, activePage, searchedPlace, etaData } = usePageTitle();
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [activeIdx, setActiveIdx] = useState(-1);
@@ -90,13 +90,20 @@ export default function Header() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  useEffect(() => {
+    if (activePage !== 'explore') return;
+
+    const destinationName = searchedPlace?.displayName || searchedPlace?.formatted_address?.split(',')[0] || '';
+    setQuery(destinationName);
+  }, [activePage, searchedPlace]);
+
   const startPageDestination = searchedPlace?.displayName || searchedPlace?.formatted_address?.split(',')[0] || '';
   const isStartPage = activePage === 'start';
   const isEtaPage = activePage === 'eta';
   const readOnlySearch = isStartPage || isEtaPage;
 
   return (
-    <header className="relative z-10 bg-white/90 backdrop-blur-sm shadow-md py-1 h-28 overflow-visible" style={{ borderBottom: '1px solid #F5F7FA', transform: 'translateZ(0)', willChange: 'transform' }}>
+    <header className="relative z-50 bg-white/90 backdrop-blur-sm shadow-md py-1 h-28 overflow-visible" style={{ borderBottom: '1px solid #F5F7FA', transform: 'translateZ(0)', willChange: 'transform' }}>
       <div className="max-w-11xl mx-auto flex items-center justify-between h-full">
         {/* Left: logo + text */}
         <div className="flex items-center gap-1 h-full relative">
@@ -160,6 +167,13 @@ export default function Header() {
               {isEtaPage && (
                 <span style={{ fontSize: '13px', fontWeight: 700, color: '#111827', marginRight: '24px' }}>ETA Details</span>
               )}
+              {isStartPage && etaData && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '8px', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#1A73E8' }}>{etaData.duration}</span>
+                  <span style={{ fontSize: '12px', color: '#374151', fontWeight: 600 }}>{etaData.distance}</span>
+                  <span style={{ fontSize: '11px', color: etaData.traffic === 'Heavy traffic' ? '#e53e3e' : etaData.traffic === 'Moderate traffic' ? '#d69e2e' : '#38a169', fontWeight: 600 }}>{etaData.traffic}</span>
+                </div>
+              )}
               {!readOnlySearch && query.trim()
                 ? <X size={18} color="#000000" strokeWidth={2} style={{ cursor: 'pointer' }} onClick={() => { setQuery(''); setSuggestions([]); }} />
                 : <Mic size={18} color="#000000" strokeWidth={2} style={{ cursor: 'pointer' }} />
@@ -197,7 +211,7 @@ export default function Header() {
             )}
           </div>
         ) : (
-          <div style={{ width: '800px', margin: '10px 30px' }} />
+          <div id="header-search-portal" style={{ width: '880px', margin: '10px 30px', position: 'relative' }} />
         )}
       </div>
     </header>

@@ -11,6 +11,7 @@ import upDown from '../assets/upDown.png';
 import { useLocationSearch } from '../utils/useLocationSearch';
 import { usePageTitle } from '../contexts/PageTitleContext';
 import { ensureMapsScript } from '../utils/helpers';
+import { saveRecentPlace } from '../services/api';
 
 const recentPlaces = [
   'Galgamuwa',
@@ -136,7 +137,9 @@ const DirectionOne = () => {
           setPendingOriginLabel(originSearch.query);
         }
         if (destStatus === 'OK' && destResults[0]) {
-          setSearchedPlace({ ...destResults[0], displayName: destinationSearch.query });
+          const destinationPlace = { ...destResults[0], displayName: destinationSearch.query };
+          setSearchedPlace(destinationPlace);
+          void saveRecentPlace(destinationPlace, 'Got Direction');
         }
         if (selectedVehicle) setPendingVehicle(selectedVehicle);
         setActivePage('direction');

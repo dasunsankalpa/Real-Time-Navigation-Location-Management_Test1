@@ -3,10 +3,12 @@ import middle from '../assets/middle.png';
 import exploreIcon from '../assets/explore.png';
 import explore2 from '../assets/explore2.png';
 import userIcon from '../assets/userIcon.png';
+import user from '../assets/user.png';
 import directionIcon from '../assets/directionIcon.png';
 import directionImg from '../assets/direction.png';
 import { usePageTitle } from '../contexts/PageTitleContext';
-import { ensureMapsScript } from '../utils/helpers';
+import { ensureMapsScript, formatViewedAgo } from '../utils/helpers';
+import { fetchRecentPlaces, saveRecentPlace } from '../services/api';
 
 const USER_LOCATION = { lat: 7.8731, lng: 80.7718 }; // Sri Lanka center
 
@@ -15,14 +17,39 @@ const Explore = () => {
   const mapInstanceRef = useRef(null);
   const markerRef = useRef(null);
   const userMarkerRef = useRef(null);
+  const lastHandledPlaceKeyRef = useRef('');
 
   const { setShowSearchBar, setOnNavigate, hasSearched, setHasSearched, searchedPlace, setActivePage, setUserLocation } = usePageTitle();
   const [localSearched, setLocalSearched] = useState(false);
   const searched = hasSearched || localSearched;
   const [placePhotos, setPlacePhotos] = useState([]);
   const [nearbyHotels, setNearbyHotels] = useState([]);
+  const [showUserPopup, setShowUserPopup] = useState(false);
+  const [selectedSavedPlaceTab, setSelectedSavedPlaceTab] = useState('home');
+  const [hoveredSavedPlaceTab, setHoveredSavedPlaceTab] = useState(null);
+  const [recentPlaces, setRecentPlaces] = useState([]);
+  const [recentPlacesLoading, setRecentPlacesLoading] = useState(false);
+  const [recentPlacesError, setRecentPlacesError] = useState('');
+  const userDisplayName = (typeof window !== 'undefined' && (window.localStorage.getItem('userName') || window.localStorage.getItem('displayName'))) || 'nethmi';
+
+  const getPlaceKey = useCallback((place) => {
+    const placeId = place?.place_id || place?.placeId || '';
+    const name = place?.displayName || place?.name || place?.formatted_address?.split(',')[0] || '';
+    const lat = typeof place?.geometry?.location?.lat === 'function' ? place.geometry.location.lat() : place?.geometry?.location?.lat;
+    const lng = typeof place?.geometry?.location?.lng === 'function' ? place.geometry.location.lng() : place?.geometry?.location?.lng;
+    return placeId || `${name}:${lat ?? ''}:${lng ?? ''}`;
+  }, []);
 
   const handleNavigate = useCallback((place) => {
+    const placeKey = getPlaceKey(place);
+    if (placeKey && lastHandledPlaceKeyRef.current === placeKey) return;
+
+    if (placeKey) {
+      lastHandledPlaceKeyRef.current = placeKey;
+    }
+
+    void saveRecentPlace(place, null);
+
     if (!mapInstanceRef.current || !place.geometry?.location) return;
     mapInstanceRef.current.panTo(place.geometry.location);
     mapInstanceRef.current.setZoom(13);
@@ -49,13 +76,20 @@ const Explore = () => {
           .sort((a, b) => (b.rating * (b.user_ratings_total || 0)) - (a.rating * (a.user_ratings_total || 0)));
         const urls = sorted.slice(0, 3).map(r => r.photos[0].getUrl({ maxWidth: 1600, maxHeight: 1200 }));
         setPlacePhotos(urls.length > 0 ? urls : []);
+        if (urls.length > 0) {
+          void saveRecentPlace(place, null, undefined, urls.slice(0, 2));
+        }
       } else if (place.photos && place.photos.length > 0) {
         const sorted = [...place.photos].sort((a, b) => {
           const aRatio = a.width / a.height;
           const bRatio = b.width / b.height;
           return Math.abs(aRatio - 1.5) - Math.abs(bRatio - 1.5);
         });
-        setPlacePhotos(sorted.slice(0, 3).map(p => p.getUrl({ maxWidth: 1600, maxHeight: 1200 })));
+        const urls = sorted.slice(0, 3).map(p => p.getUrl({ maxWidth: 1600, maxHeight: 1200 }));
+        setPlacePhotos(urls);
+        if (urls.length > 0) {
+          void saveRecentPlace(place, null, undefined, urls.slice(0, 2));
+        }
       } else {
         setPlacePhotos([]);
       }
@@ -116,7 +150,95 @@ const Explore = () => {
         setNearbyHotels([]);
       }
     });
-  }, [setHasSearched]);
+  }, [getPlaceKey, setHasSearched]);
+
+  const handleExploreAction = useCallback(() => {
+    if (!searchedPlace) return;
+    void saveRecentPlace(searchedPlace, 'Got Direction');
+    setActivePage('direction');
+  }, [searchedPlace, setActivePage]);
+
+  useEffect(() => {
+    if (!showUserPopup) return;
+
+    let isActive = true;
+
+    const loadRecentPlaces = async () => {
+      setRecentPlacesLoading(true);
+      setRecentPlacesError('');
+
+      try {
+        const response = await fetchRecentPlaces(undefined, 500);
+        if (!isActive) return;
+
+        const items = Array.isArray(response?.data) ? response.data : [];
+        setRecentPlaces(items);
+      } catch (error) {
+        if (!isActive) return;
+        setRecentPlacesError('Failed to load recent places');
+        setRecentPlaces([]);
+      } finally {
+        if (isActive) setRecentPlacesLoading(false);
+      }
+    };
+
+    loadRecentPlaces();
+
+    return () => {
+      isActive = false;
+    };
+  }, [showUserPopup]);
+
+  const getRecentPlaceImages = (place) => {
+    const storedImages = Array.isArray(place?.imageUrls) ? place.imageUrls.filter(Boolean).slice(0, 2) : [];
+
+    if (storedImages.length > 0) {
+      return storedImages;
+    }
+
+    return place?.imageUrl ? [place.imageUrl] : [];
+  };
+
+  const renderRecentPlaceMedia = (place) => {
+    const images = getRecentPlaceImages(place);
+
+    if (images.length === 0) {
+      return (
+        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Inter, sans-serif', fontSize: '12px', color: '#6B7280', textAlign: 'center', padding: '8px' }}>
+          No image
+        </div>
+      );
+    }
+
+    if (images.length === 1) {
+      return (
+        <img
+          src={images[0]}
+          alt={place?.name || 'Recent place'}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
+      );
+    }
+
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', gap: '0px', background: '#E5E7EB' }}>
+        <div style={{ width: '50%', height: '100%', overflow: 'hidden' }}>
+          <img
+            src={images[0]}
+            alt={place?.name || 'Recent place'}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+        </div>
+        <div style={{ width: '50%', height: '100%', overflow: 'hidden' }}>
+          <img
+            src={images[1]}
+            alt={place?.name || 'Recent place'}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+        </div>
+      </div>
+    );
+  };
 
   useEffect(() => {
     setShowSearchBar(true);
@@ -191,6 +313,11 @@ ensureMapsScript(() => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!searchedPlace?.geometry?.location || !mapInstanceRef.current) return;
+    handleNavigate(searchedPlace);
+  }, [searchedPlace, handleNavigate]);
+
   return (
     <div className="relative w-full h-full py-12" style={{ minHeight: '700px' }}>
       {/* Background image */}
@@ -203,18 +330,18 @@ ensureMapsScript(() => {
       </div>
 
       {/* Map area */}
-      <div style={{ marginBottom: searched ? '0' : '80px', marginLeft: '60px', marginRight: '60px', marginTop: 0 }}>
+      <div style={{ marginBottom: searched ? '0' : '80px', marginLeft: '60px', marginRight: '60px', marginTop: showUserPopup ? '-80px' : 0 }}>
         <div className="relative" style={{ width: '100%' }}>
           <div
             ref={mapRef}
             className="w-full block shadow-lg"
-            style={{ height: '620px', margin: 0, padding: 0, boxShadow: '0 4px 24px rgba(0,0,0,0.15)', overflow: 'hidden', borderRadius: '15px' }}
+            style={{ height: '750px', margin: 0, padding: 0, boxShadow: '0 4px 24px rgba(0,0,0,0.15)', overflow: 'hidden', borderRadius: '15px', position: 'relative', zIndex: 5 }}
           ></div>
           <img
             src={directionIcon}
             alt="Direction"
             onClick={() => setActivePage('directionOne')}
-            style={{ position: 'absolute', bottom: '20px', right: '50px', width: '70px', cursor: 'pointer', zIndex: 10 }}
+            style={{ position: 'absolute', bottom: '20px', right: '50px', width: '70px', cursor: 'pointer', zIndex: 40 }}
           />
         </div>
       </div>
@@ -274,14 +401,29 @@ ensureMapsScript(() => {
                 }}>
                   {searchedPlace.displayName || searchedPlace.formatted_address?.split(',')[0]}
                 </span>
-                <div style={{ display: 'flex', gap: '250px',marginTop: '60px' }}>
-                  {[{ label: 'Direction', icon: directionImg }, { label: 'Start', icon: null }, { label: 'Save', icon: null }, { label: 'Share', icon: null }].map(({ label, icon }) => (
+                <div style={{ display: 'flex', gap: '16px', marginTop: '60px', width: '100%' }}>
+                  {[
+                    { 
+                      label: 'Direction', 
+                      iconSvg: (
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polygon points="12 2 22 12 12 22 2 12 12 2" />
+                          <polyline points="9 10 12 7 15 10" />
+                          <line x1="12" y1="17" x2="12" y2="7" />
+                        </svg>
+                      ) 
+                    }, 
+                    { label: 'Start', iconSvg: null }, 
+                    { label: 'Save', iconSvg: null }, 
+                    { label: 'Share', iconSvg: null }
+                  ].map(({ label, iconSvg }) => (
                     <button
                       key={label}
-                      onClick={() => label === 'Direction' && setActivePage('direction')}
+                      onClick={() => (label === 'Direction' || label === 'Start') ? handleExploreAction() : undefined}
                       style={{
-                        padding: '10px 24px',
-                        borderRadius: '6px',
+                        flex: 1,
+                        padding: '14px 0',
+                        borderRadius: '8px',
                         border: 'none',
                         background: '#1A73E8',
                         color: '#fff',
@@ -291,11 +433,11 @@ ensureMapsScript(() => {
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
+                        justifyContent: 'center',
                         gap: '8px',
-                        ...(label === 'Direction' && { paddingLeft: '39px', paddingRight: '39px' }),
                       }}
                     >
-                      {icon && <img src={icon} alt={label} style={{ width: '23px', height: '23px', objectFit: 'contain', marginLeft: '-15px' }} />}
+                      {iconSvg}
                       {label}
                     </button>
                   ))}
@@ -413,10 +555,172 @@ ensureMapsScript(() => {
       ) : (
         <div
           className="relative z-10 flex justify-center items-center gap-[30rem]"
-          style={{ marginTop: '8px', marginBottom: '8px', paddingLeft: '16px', paddingRight: '16px' }}
+          style={{ marginTop: '120px', marginBottom: '8px', paddingLeft: '16px', paddingRight: '16px', zIndex: 40 }}
         >
-          <img src={exploreIcon} alt="Explore" style={{ width: '140px', cursor: 'pointer' }} />
-          <img src={userIcon}    alt="User"    style={{ width: '140px', cursor: 'pointer' }} />
+          <img
+            src={exploreIcon}
+            alt="Explore"
+            style={{ width: '140px', cursor: 'pointer', position: 'relative', zIndex: 40 }}
+            onClick={() => setShowUserPopup(false)}
+          />
+          {showUserPopup && (
+            <div
+              style={{
+                position: 'absolute',
+                left: '60px',
+                right: '60px',
+                top: '-750px',
+                height: '890px',
+                borderRadius: '12px',
+                background: '#D7EEFD',
+                boxShadow: '0 4px 18px rgba(26,115,232,0.12)',
+                padding: '18px 22px',
+                display: 'flex',
+                flexDirection: 'column',
+                zIndex: 20,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px',marginLeft: '25px' }}>
+                <div
+                  style={{
+                    width: '70px',
+                    height: '70px',
+                    borderRadius: '999px',
+                    background: '#E5E7EB',
+                    overflow: 'hidden',
+                    flexShrink: 0,
+                    display: 'flex',              // enable flexbox
+                    justifyContent: 'center',     // center horizontally
+                    alignItems: 'center', 
+                  }}
+                >
+                  <img src={user} alt="User" style={{ width: '40%', height: '40%', objectFit: 'cover', }} />
+                </div>
+                <div style={{ lineHeight: 1.05 }}>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '20px', fontWeight: 700, color: '#1F2937' }}>
+                    You
+                  </div>
+                  <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '15px', fontWeight: 500, color: '#374151', marginTop: '4px' }}>
+                    {userDisplayName}
+                  </div>
+                </div>
+              </div>
+              <div style={{ marginTop: '72px'}}>
+                <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '16px', fontWeight: 500, color: '#1F2937', marginBottom: '18px',marginLeft: '65px' }}>
+                  Save Places
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'stretch',
+                    justifyContent: 'space-between',
+                    gap: '10px',
+                    background: '#8CC9F3',
+                    borderRadius: '6px',
+                    padding: '8px 12px',
+                    maxWidth: '100%',
+                    boxSizing: 'border-box',
+                    marginLeft: '120px',
+                    marginRight: '120px',
+                    boxShadow: '0 2px 6px rgba(26,115,232,0.10) inset',
+                  }}
+                >
+                  {[
+                    { key: 'home', label: 'home', icon: true },
+                    { key: 'work', label: 'work', icon: false },
+                    { key: 'favorite', label: 'Favorite', icon: false },
+                  ].map((tab) => {
+                    const selected = selectedSavedPlaceTab === tab.key;
+                    const hovered = hoveredSavedPlaceTab === tab.key;
+                    return (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => setSelectedSavedPlaceTab(tab.key)}
+                        onMouseEnter={() => setHoveredSavedPlaceTab(tab.key)}
+                        onMouseLeave={() => setHoveredSavedPlaceTab(null)}
+                        style={{
+                          flex: 1,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '10px',
+                          minHeight: '40px',
+                          border: 'none',
+                          borderRadius: '4px',
+                          background: selected ? 'rgba(31,41,55,0.10)' : hovered ? 'rgba(160,219,255,0.55)' : 'transparent',
+                          boxShadow: selected ? 'inset 0 0 0 1px rgba(31,41,55,0.12)' : 'none',
+                          color: '#1F2937',
+                          cursor: 'pointer',
+                          transition: 'background 0.15s ease, box-shadow 0.15s ease',
+                        }}
+                      >
+                        {tab.icon && (
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1F2937" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M3 10.5 12 3l9 7.5" />
+                            <path d="M5 10v10h14V10" />
+                            <path d="M9 20v-7h6v7" />
+                          </svg>
+                        )}
+                        <span style={{ fontFamily: 'Inter, sans-serif', fontSize: '15px', fontWeight: selected ? 700 : 500, color: selected || hovered ? '#111827' : '#1F2937' }}>{tab.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{ marginTop: '40px',marginLeft: '65px', fontFamily: 'Inter, sans-serif', fontSize: '16px', fontWeight: 500, color: '#1F2937' }}>
+                  Your Recent Places
+                </div>
+                <div style={{ marginTop: '20px', marginLeft: '40px', marginRight: '40px', maxHeight: '390px', overflowY: 'auto', paddingRight: '8px' }}>
+                  {recentPlacesLoading && (
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', color: '#374151' }}>
+                      Loading recent places...
+                    </div>
+                  )}
+
+                  {!recentPlacesLoading && recentPlacesError && (
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', color: '#B91C1C' }}>
+                      {recentPlacesError}
+                    </div>
+                  )}
+
+                  {!recentPlacesLoading && !recentPlacesError && recentPlaces.length === 0 && (
+                    <div style={{ fontFamily: 'Inter, sans-serif', fontSize: '14px', color: '#374151' }}>
+                      No recent places found.
+                    </div>
+                  )}
+
+                  {!recentPlacesLoading && !recentPlacesError && recentPlaces.length > 0 && (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gridAutoRows: 'minmax(102px, auto)', gap: '26px 44px' }}>
+                      {recentPlaces.map((place) => {
+                        const placeName = place?.name || 'Unknown place';
+                        const actionLabel = place?.action || 'Viewed';
+                        const viewedLabel = place?.action === 'Got Direction' ? 'Got Direction' : formatViewedAgo(place?.timestamp);
+
+                        return (
+                          <div key={place._id} style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                            <div style={{ width: '102px', height: '102px', borderRadius: '16px', overflow: 'hidden', background: '#E5E7EB', flexShrink: 0, boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}>
+                              {renderRecentPlaceMedia(place)}
+                            </div>
+
+                            <div style={{ fontFamily: 'Inter, sans-serif', color: '#111827', lineHeight: 1.2 }}>
+                              <div style={{ fontSize: '16px', fontWeight: 500 }}>{placeName}</div>
+                              <div style={{ fontSize: '13px', marginTop: '4px' }}>{viewedLabel}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          <img
+            src={userIcon}
+            alt="User"
+            style={{ width: '140px', cursor: 'pointer', position: 'relative', zIndex: 40 }}
+            onClick={() => setShowUserPopup((value) => !value)}
+          />
         </div>
       )}
     </div>

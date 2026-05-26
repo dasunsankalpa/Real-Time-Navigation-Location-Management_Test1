@@ -1,11 +1,8 @@
 import Explore from './pages/Explore';
 import Direction from './pages/Direction';
-import AddStopPlaces from './pages/AddStopPlaces';
 import DirectionOne from './pages/DirectionOne';
 import EtaPage from './pages/EtaPage';
 import SafetyAlertTemplate from './pages/SafetyAlertTemplate';
-import StartPage from './pages/StartPage';
-import UserPage from './pages/UserPage';
 import Footer from './components/Footer';
 import Header from './components/Header';
 import { PageTitleProvider, usePageTitle } from './contexts/PageTitleContext';
@@ -18,12 +15,10 @@ import { PageTitleProvider, usePageTitle } from './contexts/PageTitleContext';
 const PAGES = {
   explore:      <Explore />,
   direction:    <Direction />,
-  addStop:      <AddStopPlaces />,
   directionOne: <DirectionOne />,
   eta:          <EtaPage />,
   safety:       <SafetyAlertTemplate />,
-  start:        <StartPage />,
-  user:         <UserPage />,
+  start:        <Direction showDetailsPanel={false} />,
 };
 
 function AppContent() {
